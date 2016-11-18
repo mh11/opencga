@@ -21,6 +21,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.*;
+import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.filter.*;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.phoenix.util.QueryUtil;
@@ -60,9 +61,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -116,9 +115,10 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
             try {
                 java.sql.Connection connection = phoenixHelper.newJdbcConnection(this.configuration);
                 if (!phoenixCon.compareAndSet(null, connection)) {
-                    connection.close(); // already set in the mean time
+                    close(connection); // already set in the mean time
+                } else {
+                    logger.info("Opened Phoenix Connection " + connection);
                 }
-                logger.info("Opened Phoenix Connection " + connection);
             } catch (SQLException | ClassNotFoundException e) {
                 throw new IllegalStateException(e);
             }
@@ -189,14 +189,17 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
     @Override
     public void close() throws IOException {
         this.genomeHelper.close();
-        java.sql.Connection connection = this.phoenixCon.getAndSet(null);
+        try {
+            this.close(this.phoenixCon.getAndSet(null));
+        } catch (SQLException e) {
+            throw new IOException(e);
+        }
+    }
+
+    private void close(java.sql.Connection connection) throws SQLException {
         if (connection != null) {
-            try {
-                logger.info("Close Phoenix Connection " + connection);
-                connection.close();
-            } catch (SQLException e) {
-                throw new IOException(e);
-            }
+            logger.info("Close Phoenix Connection " + connection);
+            connection.close();
         }
     }
 
@@ -288,9 +291,8 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
         long startTime = System.currentTimeMillis();
         String sql = queryParser.parse(query, new QueryOptions(VariantSqlQueryParser.COUNT, true));
         logger.info(sql);
-        try {
-            Statement statement = getJdbcConnection().createStatement();
-            ResultSet resultSet = statement.executeQuery(sql);
+        try (Statement statement = getJdbcConnection().createStatement();
+             ResultSet resultSet = statement.executeQuery(sql)) { // Closes Statement and RS at the end
             resultSet.next();
             long count = resultSet.getLong(1);
             return new QueryResult<>("count", ((int) (System.currentTimeMillis() - startTime)),
@@ -404,18 +406,18 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
             try {
                 if (true) {
                     System.err.println("---- " + "EXPLAIN " + sql);
-                    try (Statement statement = getJdbcConnection().createStatement()) {
-                        ResultSet resultSet = statement.executeQuery("EXPLAIN " + sql);
+                    try (Statement statement = getJdbcConnection().createStatement(); // Close Statement and RS
+                         ResultSet resultSet = statement.executeQuery("EXPLAIN " + sql)) {
                         String explain = QueryUtil.getExplainPlan(resultSet);
-                        System.err.println("EXPLANATION: \n" + explain);
+                        logger.debug("EXPLANATION: \n" + explain);
                     }
                 }
 
-                Statement statement = getJdbcConnection().createStatement();
+                Statement statement = getJdbcConnection().createStatement(); // Statement closed by iterator
                 statement.setFetchSize(options.getInt("batchSize", -1));
-                ResultSet resultSet = statement.executeQuery(sql);
+                ResultSet resultSet = statement.executeQuery(sql); // Resultset closed by iterator
                 List<String> returnedSamples = getDBAdaptorUtils().getReturnedSamples(query, options);
-                VariantHBaseResultSetIterator iterator = new VariantHBaseResultSetIterator(
+                VariantHBaseResultSetIterator iterator = new VariantHBaseResultSetIterator(statement,
                         resultSet, genomeHelper, getStudyConfigurationManager(), options, returnedSamples);
 
                 // Client side skip!

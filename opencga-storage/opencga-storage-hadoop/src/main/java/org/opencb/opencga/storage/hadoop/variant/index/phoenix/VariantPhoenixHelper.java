@@ -191,7 +191,10 @@ public class VariantPhoenixHelper {
     }
 
     public Connection newJdbcConnection(Configuration conf) throws SQLException, ClassNotFoundException {
-        return QueryUtil.getConnection(conf);
+        Connection connection = QueryUtil.getConnection(conf);
+        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+        logger.info("Opened Phoenix DB connection {} called from {}", connection, Arrays.toString(stackTrace));
+        return connection;
     }
 
     public void updateAnnotationFields(Connection con, String tableName) throws SQLException {
