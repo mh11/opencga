@@ -55,26 +55,10 @@ public class CohortWSServer extends OpenCGAWSServer {
         cohortManager = catalogManager.getCohortManager();
     }
 
-    @GET
-    @Path("/create")
-    @ApiOperation(value = "Create a cohort", position = 1, notes = "A cohort can be created by providing a list of SampleIds, " +
-            "or providing a categorical variable (both variableSetId and variable). " +
-            "If none of this is given, an empty cohort will be created.", response = Cohort.class)
-    public Response createCohort(@ApiParam(value = "(DEPRECATED) Use study instead", required = true) @QueryParam("studyId")
-                                             String studyIdStr,
-                                 @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                        @QueryParam("study") String studyStr,
-                                 @ApiParam(value = "name", required = true) @QueryParam("name") String cohortName,
-                                 @ApiParam(value = "type", required = false) @QueryParam("type") @DefaultValue("COLLECTION")
-                                             Study.Type type,
-                                 @ApiParam(value = "variableSetId", required = false) @QueryParam("variableSetId") long variableSetId,
-                                 @ApiParam(value = "description", required = false) @QueryParam("description") String cohortDescription,
-                                 @ApiParam(value = "sampleIds", required = false) @QueryParam("sampleIds") String sampleIdsStr,
-                                 @ApiParam(value = "Variable name", required = false) @QueryParam("variable") String variableName) {
+    private Response createCohort(String studyStr, String cohortName, Study.Type type, long variableSetId, String cohortDescription,
+                                  String sampleIdsStr, String variableName) {
         try {
-            if (StringUtils.isNotEmpty(studyIdStr)) {
-                studyStr = studyIdStr;
-            }
+
             List<QueryResult<Cohort>> cohorts = new LinkedList<>();
             if (variableName != null && !variableName.isEmpty() && sampleIdsStr != null && !sampleIdsStr.isEmpty()) {
                 return createErrorResponse("", "Can only create a cohort given list of sampleIds or a categorical "
@@ -108,7 +92,7 @@ public class CohortWSServer extends OpenCGAWSServer {
                     Query samplesQuery = new Query(SampleDBAdaptor.QueryParams.ANNOTATION.key() + "." + variableName, s)
                             .append("variableSetId", variableSetId);
 
-                    cohorts.add(createCohort(studyId, s, type, cohortDescription, samplesQuery, samplesQOptions));
+                    cohorts.add(createCohort(studyId, cohortName + "_" + s, type, cohortDescription, samplesQuery, samplesQOptions));
                 }
             } else {
                 //Create empty cohort
@@ -122,6 +106,59 @@ public class CohortWSServer extends OpenCGAWSServer {
     }
 
     @GET
+    @Path("/create")
+    @ApiOperation(value = "Create a cohort", position = 1, notes = "A cohort can be created by providing a list of SampleIds, " +
+            "or providing a categorical variable (both variableSetId and variable). " +
+            "If none of this is given, an empty cohort will be created.", response = Cohort.class)
+    public Response createCohort(@ApiParam(value = "(DEPRECATED) Use study instead", required = true) @QueryParam("studyId")
+                                         String studyIdStr,
+                                 @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
+                                 @QueryParam("study") String studyStr,
+                                 @ApiParam(value = "Name of the cohort.", required = true) @QueryParam ("name") String cohortName,
+                                 @ApiParam(value = "type", required = false) @QueryParam("type") @DefaultValue("COLLECTION")
+                                         Study.Type type,
+                                 @ApiParam(value = "variableSetId", required = false) @QueryParam("variableSetId") long variableSetId,
+                                 @ApiParam(value = "description", required = false) @QueryParam("description") String cohortDescription,
+                                 @ApiParam(value = "(DEPRECATED) sampleIds", required = false) @QueryParam("sampleIds") String sampleIdsStr,
+                                 @ApiParam(value = "Samples", required = false) @QueryParam("samples") String samplesStr,
+                                 @ApiParam(value = "Variable name", required = false) @QueryParam("variable") String variableName) {
+
+        if (StringUtils.isNotEmpty(studyIdStr)) {
+            studyStr = studyIdStr;
+        }
+        if (StringUtils.isNotEmpty(sampleIdsStr)) {
+            samplesStr = sampleIdsStr;
+        }
+        return createCohort(studyStr, cohortName, type, variableSetId, cohortDescription, samplesStr, variableName);
+    }
+
+    private static class CohortParameters {
+        public String name;
+        public Study.Type type;
+        public String description;
+        public String samples;
+    }
+
+    @POST
+    @Path("/create")
+    @ApiOperation(value = "Create a cohort", position = 1, notes = "A cohort can be created by providing a list of SampleIds, " +
+            "or providing a categorical variable (both variableSetId and variable). " +
+            "If none of this is given, an empty cohort will be created.", response = Cohort.class)
+    public Response createCohort(
+            @ApiParam(value = "(DEPRECATED) Use study instead", required = true) @QueryParam("studyId") String studyIdStr,
+            @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias") @QueryParam("study")
+                    String studyStr,
+            @ApiParam(value = "variableSetId") @QueryParam("variableSetId") long variableSetId,
+            @ApiParam(value = "Variable name") @QueryParam("variable") String variableName,
+            @ApiParam(value="JSON containing cohort information", required = true) CohortParameters params) {
+        if (StringUtils.isNotEmpty(studyIdStr)) {
+            studyStr = studyIdStr;
+        }
+
+        return createCohort(studyStr, params.name, params.type, variableSetId, params.description, params.samples, variableName);
+    }
+
+    @GET
     @Path("/{cohortId}/info")
     @ApiOperation(value = "Get cohort information", position = 2, response = Cohort.class)
     @ApiImplicitParams({
@@ -131,9 +168,9 @@ public class CohortWSServer extends OpenCGAWSServer {
                     example = "id,status", dataType = "string", paramType = "query"),
     })
     public Response infoSample(@ApiParam(value = "Comma separated list of cohort names or ids", required = true) @PathParam("cohortId")
-                                           String cohortStr,
+                                       String cohortStr,
                                @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                        @QueryParam("study") String studyStr) {
+                               @QueryParam("study") String studyStr) {
         try {
             try {
                 List<QueryResult<Cohort>> queryResults = new LinkedList<>();
@@ -180,7 +217,6 @@ public class CohortWSServer extends OpenCGAWSServer {
         }
     }
 
-
     @GET
     @Path("/{cohortId}/samples")
     @ApiOperation(value = "Get samples from cohort", position = 3, response = Sample[].class)
@@ -196,7 +232,7 @@ public class CohortWSServer extends OpenCGAWSServer {
     })
     public Response getSamples(@ApiParam(value = "cohortId", required = true) @PathParam("cohortId") String cohortStr,
                                @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                    @QueryParam("study") String studyStr) {
+                               @QueryParam("study") String studyStr) {
         try {
             AbstractManager.MyResourceId resource = cohortManager.getId(cohortStr, studyStr, sessionId);
             long cohortId = resource.getResourceId();
@@ -232,12 +268,12 @@ public class CohortWSServer extends OpenCGAWSServer {
     @ApiOperation(value = "Update some user attributes using GET method", position = 4, response = Cohort.class)
     public Response update(@ApiParam(value = "cohortId", required = true) @PathParam("cohort") String cohortStr,
                            @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                @QueryParam("study") String studyStr,
+                           @QueryParam("study") String studyStr,
                            @ApiParam(value = "") @QueryParam("name") String name,
                            @ApiParam(value = "") @QueryParam("creationDate") String creationDate,
                            @ApiParam(value = "") @QueryParam("description") String description,
                            @ApiParam(value = "Comma separated values of sampleIds. Will replace all existing sampleIds")
-                               @QueryParam("samples") String samples) {
+                           @QueryParam("samples") String samples) {
         try {
             long cohortId = cohortManager.getId(cohortStr, studyStr, sessionId).getResourceId();
             // TODO: Change queryOptions, queryOptions
@@ -252,7 +288,7 @@ public class CohortWSServer extends OpenCGAWSServer {
     @ApiOperation(value = "Update some user attributes using POST method", position = 4)
     public Response updateByPost(@ApiParam(value = "cohortId", required = true) @PathParam("cohort") String cohortStr,
                                  @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                        @QueryParam("study") String studyStr,
+                                 @QueryParam("study") String studyStr,
                                  @ApiParam(value = "params", required = true) Map<String, Object> params) {
         try {
             long cohortId = cohortManager.getId(cohortStr, studyStr, sessionId).getResourceId();
@@ -266,15 +302,15 @@ public class CohortWSServer extends OpenCGAWSServer {
     @Path("/{cohorts}/stats")
     @ApiOperation(value = "Cohort stats", position = 2)
     public Response stats(@ApiParam(value = "Comma separated list of cohort names or ids", required = true)
-                              @PathParam("cohorts") String cohortIdsCsv,
+                          @PathParam("cohorts") String cohortIdsCsv,
                           @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                @QueryParam("study") String studyStr,
+                          @QueryParam("study") String studyStr,
                           @ApiParam(value = "Calculate cohort stats [PENDING]", required = false)
                           @QueryParam("calculate") boolean calculate,
                           @ApiParam(value = "Delete stats [PENDING]", required = false) @QueryParam("delete") boolean delete,
                           @ApiParam(value = "Log level", required = false) @QueryParam("log") String logLevel,
                           @ApiParam(value = "Output directory", required = false) @QueryParam("outdirId") String outdirIdStr
-                          ) {
+    ) {
         try {
             List<Long> cohortIds = cohortManager.getIds(cohortIdsCsv, studyStr, sessionId).getResourceIds();
             if (calculate) {
@@ -305,7 +341,7 @@ public class CohortWSServer extends OpenCGAWSServer {
     @ApiOperation(value = "Delete cohort.", position = 5)
     public Response deleteCohort(@ApiParam(value = "cohortId", required = true) @PathParam("cohort") String cohortStr,
                                  @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                        @QueryParam("study") String studyStr) {
+                                 @QueryParam("study") String studyStr) {
         try {
 //            long cohortId = catalogManager.getCohortId(cohortStr, sessionId);
             List<QueryResult<Cohort>> delete = cohortManager.delete(cohortStr, studyStr, queryOptions, sessionId);
@@ -322,7 +358,7 @@ public class CohortWSServer extends OpenCGAWSServer {
                                            @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or"
                                                    + " alias") @QueryParam("study") String studyStr,
                                            @ApiParam(value = "variableSetId", required = true) @QueryParam("variableSetId")
-                                                       long variableSetId,
+                                                   long variableSetId,
                                            @ApiParam(value = "annotation", required = false) @QueryParam("annotation") String annotation,
                                            @ApiParam(value = "Indicates whether to show the annotations as key-value",
                                                    defaultValue = "false") @QueryParam("asMap") boolean asMap) {
@@ -344,7 +380,7 @@ public class CohortWSServer extends OpenCGAWSServer {
                                          @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or"
                                                  + " alias") @QueryParam("study") String studyStr,
                                          @ApiParam(value = "Indicates whether to show the annotations as key-value", defaultValue = "false")
-                                             @QueryParam("asMap") boolean asMap) {
+                                         @QueryParam("asMap") boolean asMap) {
         try {
             if (asMap) {
                 return createOkResponse(cohortManager.getAllAnnotationSetsAsMap(cohortStr, studyStr, sessionId));
@@ -364,9 +400,9 @@ public class CohortWSServer extends OpenCGAWSServer {
                                        @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or"
                                                + " alias") @QueryParam("study") String studyStr,
                                        @ApiParam(value = "VariableSetId of the new annotation", required = true)
-                                           @QueryParam("variableSetId") long variableSetId,
+                                       @QueryParam("variableSetId") long variableSetId,
                                        @ApiParam(value = "Annotation set name. Must be unique for the sample", required = true)
-                                           @QueryParam("annotateSetName") String annotateSetName,
+                                       @QueryParam("annotateSetName") String annotateSetName,
                                        Map<String, Object> annotations) {
         try {
             QueryResult<AnnotationSet> queryResult = cohortManager.createAnnotationSet(cohortStr, studyStr, variableSetId,
@@ -384,7 +420,7 @@ public class CohortWSServer extends OpenCGAWSServer {
                                         @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or "
                                                 + "alias") @QueryParam("study") String studyStr,
                                         @ApiParam(value = "annotationSetName", required = true) @PathParam("annotationSetName")
-                                                    String annotationSetName,
+                                                String annotationSetName,
                                         @ApiParam(value = "[NOT IMPLEMENTED] Comma separated list of annotation names to be deleted",
                                                 required = false) @QueryParam("annotations") String annotations) {
         try {
@@ -408,7 +444,7 @@ public class CohortWSServer extends OpenCGAWSServer {
                                         @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or"
                                                 + " alias") @QueryParam("study") String studyStr,
                                         @ApiParam(value = "annotationSetName", required = true) @PathParam("annotationSetName")
-                                                    String annotationSetName,
+                                                String annotationSetName,
 //                                      @ApiParam(value = "variableSetId", required = true) @QueryParam("variableSetId") long variableSetId,
 //                                      @ApiParam(value = "reset", required = false) @QueryParam("reset") String reset,
                                         Map<String, Object> annotations) {
@@ -428,9 +464,9 @@ public class CohortWSServer extends OpenCGAWSServer {
                                       @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or "
                                               + "alias") @QueryParam("study") String studyStr,
                                       @ApiParam(value = "annotationSetName", required = true) @PathParam("annotationSetName")
-                                                  String annotationSetName,
+                                              String annotationSetName,
                                       @ApiParam(value = "Indicates whether to show the annotations as key-value", defaultValue = "false")
-                                          @QueryParam("asMap") boolean asMap) {
+                                      @QueryParam("asMap") boolean asMap) {
         try {
             if (asMap) {
                 return createOkResponse(cohortManager.getAnnotationSetAsMap(cohortStr, studyStr, annotationSetName, sessionId));
@@ -446,25 +482,25 @@ public class CohortWSServer extends OpenCGAWSServer {
     @Path("/groupBy")
     @ApiOperation(value = "Group cohorts by several fields", position = 24)
     public Response groupBy(@ApiParam(value = "Comma separated list of fields by which to group by.", required = true) @DefaultValue("")
-                                @QueryParam("fields") String fields,
+                            @QueryParam("fields") String fields,
                             @ApiParam(value = "(DEPRECATED) Use study instead", required = true) @DefaultValue("") @QueryParam("studyId")
                                     String studyIdStr,
                             @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                @QueryParam("study") String studyStr,
+                            @QueryParam("study") String studyStr,
                             @ApiParam(value = "Comma separated list of ids.", required = false) @DefaultValue("") @QueryParam("id")
-                                        String ids,
+                                    String ids,
                             @ApiParam(value = "Comma separated list of names.", required = false) @DefaultValue("") @QueryParam("name")
-                                        String names,
+                                    String names,
                             @ApiParam(value = "Comma separated Type values.", required = false) @DefaultValue("") @QueryParam("type")
-                                        String type,
+                                    String type,
                             @ApiParam(value = "status", required = false) @DefaultValue("") @QueryParam("status") String status,
                             @ApiParam(value = "creationDate", required = false) @DefaultValue("") @QueryParam("creationDate")
-                                        String creationDate,
+                                    String creationDate,
                             @ApiParam(value = "Comma separated sampleIds", required = false) @DefaultValue("") @QueryParam("sampleIds")
-                                        String sampleIds,
+                                    String sampleIds,
                             @ApiParam(value = "attributes", required = false) @DefaultValue("") @QueryParam("attributes") String attributes,
                             @ApiParam(value = "numerical attributes", required = false) @DefaultValue("") @QueryParam("nattributes")
-                                        String nattributes) {
+                                    String nattributes) {
         try {
             QueryResult result = cohortManager.groupBy(studyIdStr, query, queryOptions, fields, sessionId);
             return createOkResponse(result);
@@ -477,9 +513,9 @@ public class CohortWSServer extends OpenCGAWSServer {
     @Path("/{cohorts}/acl")
     @ApiOperation(value = "Return the acl of the cohort", position = 18)
     public Response getAcls(@ApiParam(value = "Comma separated list of cohort ids", required = true) @PathParam("cohorts")
-                                        String cohortIdsStr,
+                                    String cohortIdsStr,
                             @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                @QueryParam("study") String studyStr) {
+                            @QueryParam("study") String studyStr) {
         try {
             return createOkResponse(catalogManager.getAllCohortAcls(cohortIdsStr, studyStr, sessionId));
         } catch (Exception e) {
@@ -492,11 +528,11 @@ public class CohortWSServer extends OpenCGAWSServer {
     @Path("/{cohorts}/acl/create")
     @ApiOperation(value = "Define a set of permissions for a list of members", position = 19)
     public Response createRole(@ApiParam(value = "Comma separated list of cohort ids", required = true) @PathParam("cohorts")
-                                           String cohortIdsStr,
+                                       String cohortIdsStr,
                                @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                    @QueryParam("study") String studyStr,
+                               @QueryParam("study") String studyStr,
                                @ApiParam(value = "Comma separated list of permissions that will be granted to the member list")
-                                   @DefaultValue("") @QueryParam("permissions") String permissions,
+                               @DefaultValue("") @QueryParam("permissions") String permissions,
                                @ApiParam(value = "Comma separated list of members. Accepts: '{userId}', '@{groupId}' or '*'",
                                        required = true) @DefaultValue("") @QueryParam("members") String members) {
         try {
@@ -511,7 +547,7 @@ public class CohortWSServer extends OpenCGAWSServer {
     @ApiOperation(value = "Return the set of permissions granted for the member", position = 20)
     public Response getAcl(@ApiParam(value = "cohortId", required = true) @PathParam("cohort") String cohortIdStr,
                            @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                @QueryParam("study") String studyStr,
+                           @QueryParam("study") String studyStr,
                            @ApiParam(value = "Member id", required = true) @PathParam("memberId") String memberId) {
         try {
             return createOkResponse(catalogManager.getCohortAcl(cohortIdStr, studyStr, memberId, sessionId));
@@ -525,14 +561,14 @@ public class CohortWSServer extends OpenCGAWSServer {
     @ApiOperation(value = "Update the set of permissions granted for the member", position = 21)
     public Response updateAcl(@ApiParam(value = "cohortId", required = true) @PathParam("cohort") String cohortIdStr,
                               @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                    @QueryParam("study") String studyStr,
+                              @QueryParam("study") String studyStr,
                               @ApiParam(value = "Member id", required = true) @PathParam("memberId") String memberId,
                               @ApiParam(value = "Comma separated list of permissions to add", required = false)
-                                  @QueryParam("addPermissions") String addPermissions,
+                              @QueryParam("addPermissions") String addPermissions,
                               @ApiParam(value = "Comma separated list of permissions to remove", required = false)
-                                  @QueryParam("removePermissions") String removePermissions,
+                              @QueryParam("removePermissions") String removePermissions,
                               @ApiParam(value = "Comma separated list of permissions to set", required = false)
-                                  @QueryParam("setPermissions") String setPermissions) {
+                              @QueryParam("setPermissions") String setPermissions) {
         try {
             return createOkResponse(catalogManager.updateCohortAcl(cohortIdStr, studyStr, memberId, addPermissions, removePermissions,
                     setPermissions, sessionId));
@@ -546,7 +582,7 @@ public class CohortWSServer extends OpenCGAWSServer {
     @ApiOperation(value = "Delete all the permissions granted for the member", position = 22)
     public Response deleteAcl(@ApiParam(value = "cohortId", required = true) @PathParam("cohort") String cohortIdStr,
                               @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                    @QueryParam("study") String studyStr,
+                              @QueryParam("study") String studyStr,
                               @ApiParam(value = "Member id", required = true) @PathParam("memberId") String memberId) {
         try {
             return createOkResponse(catalogManager.removeCohortAcl(cohortIdStr, studyStr, memberId, sessionId));
