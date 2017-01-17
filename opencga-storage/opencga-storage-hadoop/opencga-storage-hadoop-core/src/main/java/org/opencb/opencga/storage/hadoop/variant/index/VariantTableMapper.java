@@ -20,7 +20,10 @@
 package org.opencb.opencga.storage.hadoop.variant.index;
 
 import com.google.common.collect.BiMap;
+import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.client.Get;
@@ -44,6 +47,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -52,9 +56,12 @@ import java.util.stream.Stream;
  * @author Matthias Haimel mh719+git@cam.ac.uk
  */
 public class VariantTableMapper extends AbstractVariantTableMapReduce {
+    public static final String ARCHIVE_GET_BATCH_ASYNC = "opencga.storage.hadoop.hbase.merge.archive.scan.batch.async";
 
+    private ExecutorService executorService;
 
     private final AtomicBoolean parallel = new AtomicBoolean(false);
+    private final AtomicBoolean asyncGet = new AtomicBoolean(false);
 
 
     private boolean isParallel() {
@@ -71,19 +78,31 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
             getLog().info("Using ForkJoinPool of {} ... ", cores);
             this.getResultConverter().setParallel(true);
         }
+        this.asyncGet.set(context.getConfiguration().getBoolean(ARCHIVE_GET_BATCH_ASYNC, false));
+        getLog().info("Async retrieval of archive batches: {}", this.asyncGet.get());
+        if (this.asyncGet.get()) {
+            this.executorService = Executors.newFixedThreadPool(1,  (r) -> {
+                Thread t = Executors.defaultThreadFactory().newThread(r);
+                t.setDaemon(true);
+                return t;
+            });
+        }
     }
 
-    public static  ForkJoinPool createForkJoinPool(final String prefix, int vcores) {
-        return new ForkJoinPool(vcores, pool -> {
-            ForkJoinWorkerThread worker = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
-            worker.setName(prefix + "_fjp_" + pool.getPoolSize());
-            return worker;
-        }, null, false);
+    public void setAsyncGet(boolean asyncGet) {
+        this.asyncGet.set(asyncGet);
+    }
+
+    public void setExecutorService(ExecutorService executorService) {
+        this.executorService = executorService;
     }
 
     @Override
     protected void cleanup(Context context) throws IOException, InterruptedException {
         super.cleanup(context);
+        if (null != this.executorService) {
+            this.executorService.shutdownNow();
+        }
     }
 
     protected static final VariantType[] TARGET_VARIANT_TYPE = new VariantType[] {
@@ -273,7 +292,7 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
         this.getVariantMerger().setExpectedSamples(this.currentIndexingSamples);
         Map<Integer, LinkedHashSet<Integer>> samplesInFiles = this.getStudyConfiguration().getSamplesInFiles();
         BiMap<Integer, String> id2name = StudyConfiguration.getIndexedSamples(this.getStudyConfiguration()).inverse();
-        loadFromArchive(ctx.context, ctx.getCurrRowKey(), ctx.fileIds, (fileIds, res) -> {
+        BiConsumer<Set<Integer>, Result> resultBiConsumer = (fileIds, res) -> {
             Set<String> names = fileIds.stream().flatMap(fid -> samplesInFiles.get(fid).stream())
                     .map(id -> {
                         String name = id2name.get(id);
@@ -306,7 +325,7 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
 
             startTime = System.nanoTime();
             final NavigableMap<Integer, List<Variant>> varPosSortedOther =
-                    indexAlts(archiveOther, (int)ctx.startPos, (int)ctx.nextStartPos);
+                    indexAlts(archiveOther, (int) ctx.startPos, (int) ctx.nextStartPos);
             getLog().info("Create alts index of size " + varPosSortedOther.size() + " ... ");
             ctx.context.getCounter(COUNTER_GROUP_NAME, "OTHER_VARIANTS_FROM_ARCHIVE").increment(archiveOther.size());
             ctx.context.getCounter(COUNTER_GROUP_NAME, "OTHER_VARIANTS_FROM_ARCHIVE_NUM_QUERIES").increment(1);
@@ -328,7 +347,10 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
             registerRuntime("9c Merge NEW with archive slice - overlap", overlap.get());
             registerRuntime("9d Merge NEW with archive slice - merge", merge.get());
             ctx.getContext().progress(); // Call process to avoid timeouts
-        });
+        };
+
+        // Process results
+        loadFromArchive(ctx.context, ctx.getCurrRowKey(), ctx.fileIds, resultBiConsumer);
     }
 
     @Override
@@ -552,7 +574,7 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
      * @param merge BiConsumer accepting ID list and List of {@link Variant} to merge (batch mode)
      * @throws IOException
      */
-    private void loadFromArchive(Context context, byte[] rowKey, Set<Integer> currFileIds,
+    private void loadFromArchive(Context context, final byte[] rowKey, Set<Integer> currFileIds,
                                           BiConsumer<Set<Integer>, Result> merge) throws IOException {
         // Extract File IDs to search through
         LinkedHashSet<Integer> indexedFiles = getStudyConfiguration().getIndexedFiles();
@@ -563,37 +585,122 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
             merge.accept(Collections.emptySet(), null);
             return; // done
         }
-        getLog().info("Search archive for " + archiveFileIds.size() + " files in total in batches of " + this.archiveBatchSize  + " ... ");
-        while (!archiveFileIds.isEmpty()) {
-            Long startTime = System.nanoTime();
-            // create batch
-            Set<String> batch = new HashSet<>();
-            for (String e : archiveFileIds) {
-                if (batch.size() < this.archiveBatchSize) {
-                    batch.add(e);
-                } else {
-                    break;
+        // split into equal batches
+        ConcurrentLinkedQueue<List<String>> inputQueue = new ConcurrentLinkedQueue<>();
+        inputQueue.addAll(Lists.partition(new ArrayList<>(archiveFileIds), this.archiveBatchSize));
+        getLog().info("Search archive for {} files in {} batches of up to {} ... ",
+                archiveFileIds.size(), inputQueue.size(), this.archiveBatchSize);
+
+        Function<List<String>, Result> retrieveSlice = (batch) -> {
+            try {
+                Long startTime = System.nanoTime();
+                if (getLog().isDebugEnabled()) {
+                    getLog().debug("Add files to search in archive: " + StringUtils.join(batch, ','));
                 }
+                Get get = new Get(rowKey);
+                byte[] cf = getHelper().getColumnFamily();
+                batch.forEach(e -> get.addColumn(cf, Bytes.toBytes(e)));
+                Result res = getHelper().getHBaseManager().act(getHelper().getIntputTable(), table -> table.get(get));
+                registerRuntime("9a Load archive slice from hbase", System.nanoTime() - startTime);
+                if (res.isEmpty()) {
+                    getLog().warn("No data found in archive table for {}", batch);
+                }
+                return res;
+            } catch (IOException e) {
+                throw new IllegalStateException("Prolems retrieving slice for batch ...", e);
             }
-            archiveFileIds.removeAll(batch); // remove ids
-            getLog().info("Search archive for " + batch.size() + " files with " + archiveFileIds.size()  + " remaining ... ");
-            if (getLog().isDebugEnabled()) {
-                getLog().debug("Add files to search in archive: " + StringUtils.join(batch, ','));
-            }
-            Get get = new Get(rowKey);
-            byte[] cf = getHelper().getColumnFamily();
-            batch.forEach(e -> get.addColumn(cf, Bytes.toBytes(e)));
-            Set<Integer> batchIds = batch.stream().map(e -> Integer.valueOf(e)).collect(Collectors.toSet());
-            Result res = getHelper().getHBaseManager().act(getHelper().getIntputTable(), table -> table.get(get));
-            registerRuntime("9a Load archive slice from hbase", System.nanoTime() - startTime);
-            if (res.isEmpty()) {
-                getLog().warn("No data found in archive table!!!");
-                merge.accept(batchIds, null);
-            } else {
-                merge.accept(batchIds, res);
-            }
+        };
+
+
+        BiConsumer<Set<Integer>, Result> submitResults = merge;
+        if (asyncGet.get()) {
+            loadFromArchiveAsync(context, inputQueue, retrieveSlice, merge);
+        } else {
+            loadFromArchiveSync(context, inputQueue, retrieveSlice, merge);
         }
         getLog().info("Done processing archive data!");
+    }
+
+    private void loadFromArchiveSync(Context context, Queue<List<String>> inputQueue, Function<List<String>, Result> retriever,
+                                     BiConsumer<Set<Integer>, Result> consumer) {
+        while (!Thread.interrupted()) {
+            List<String> batch = inputQueue.poll();
+            if (null == batch) {
+                getLog().info("All batches loaded");
+                break; // finished
+            }
+            getLog().info("Search archive for {} files with {} remaining ... ", batch.size(), inputQueue.size());
+            Result result = retriever.apply(batch);
+            Set<Integer> batchIds = batch.stream().map(e -> Integer.valueOf(e)).collect(Collectors.toSet());
+            consumer.accept(batchIds, result);
+        }
+    }
+
+    private void loadFromArchiveAsync(Context context, ConcurrentLinkedQueue<List<String>> inputQueue, Function<List
+            <String>, Result> retriever, BiConsumer<Set<Integer>, Result> consumer) {
+        // low capacity for output queue - save memory
+        BlockingQueue<Pair<Set<Integer>, Result>> outputQueue = new LinkedBlockingQueue<>(1);
+        AtomicBoolean done = new AtomicBoolean(false);
+
+
+        // Submit output to queue
+        BiConsumer<Set<Integer>, Result> queueConsumer = (idSet, results) -> {
+            try {
+                outputQueue.put(new ImmutablePair<>(idSet, results));
+            } catch (InterruptedException e) {
+                throw new IllegalStateException("Issue with adding ", e);
+            }
+        };
+
+        Callable<String> callable = () -> {
+            try {
+                // use default implementation, only consumer is changed
+                loadFromArchiveSync(context, inputQueue, retriever, queueConsumer);
+                // signal finished!!!
+                outputQueue.put(new ImmutablePair<>(Collections.emptySet(), null));
+                return "Done";
+            } finally {
+                done.set(true);
+            }
+        };
+        Future<String> future = executorService.submit(callable);
+        boolean allFine = true;
+        int cnt = 0;
+        try {
+            // while NOT (input emtpy and output empty and done)
+            while (!(inputQueue.isEmpty() && outputQueue.isEmpty() && done.get())) {
+                Pair<Set<Integer>, Result> result = outputQueue.poll(1, TimeUnit.SECONDS);
+                if (null == result) { // something went wrong
+                    getLog().error("Queue waited too long for result ...");
+                    allFine = false;
+                    break;
+                }
+                Set<Integer> batch = result.getLeft();
+                if (batch.isEmpty()) {
+                    getLog().info("Queue finished and processed {} ids!!!", cnt);
+                    break; // well done
+                }
+                getLog().info("Received batch of size {}; so far {} ... ", batch.size(), cnt);
+                // submit to original consumer
+                consumer.accept(batch, result.getRight());
+                cnt += batch.size();
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("Something went wrong while loading slices ... ", e);
+        }
+        getLog().info("Check future ...");
+        try {
+            future.get(1, TimeUnit.SECONDS); // check for errors & give time to shut down.
+            if (!future.isDone()) { // not done yet -> force!!!
+                getLog().warn("Interrupt unfinished future ... ");
+                future.cancel(true);
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("Problem from callable ...", e);
+        }
+        if (!allFine) {
+            throw new IllegalStateException("Problems during execution of Query task!!!");
+        }
     }
 
     /**

@@ -158,6 +158,8 @@ storageEngines:
       mapreduce.map.memory.mb: 2560
       opencga.variant.table.mapreduce.map.java.opts: -Xmx2048m,-XX:+UseG1GC,-Djava.util.concurrent.ForkJoinPool.common.parallelism=1
       opencga.storage.hadoop.hbase.merge.archive.scan.batchsize: 2000
+      ## query HBase in a separate thread to load archive slices in batches
+      opencga.storage.hadoop.hbase.merge.archive.scan.batch.async: false
       # Increase the ScannerTimeoutPeriod from 60000 (1min) to 300000 (5min) to avoid ScannerTimeoutExceptions
       # See opencb/opencga#352 for more info.
       opencga.storage.hadoop.mapreduce.scanner.timeout: 300000
