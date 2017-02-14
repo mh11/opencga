@@ -29,6 +29,8 @@ import org.opencb.opencga.storage.core.variant.VariantStorageEngine;
 import org.opencb.opencga.storage.core.variant.VariantStorageBaseTest;
 import org.opencb.opencga.storage.hadoop.variant.adaptors.VariantHadoopDBAdaptor;
 
+import java.util.Map;
+
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -45,9 +47,14 @@ public class VariantHadoopNamespaceTest extends VariantStorageBaseTest implement
     public void setUp() throws Exception {
     }
 
+    @Override
+    public Map<String, ?> getOtherStorageConfigurationOptions() {
+        return new ObjectMap(AbstractHadoopVariantStoragePipeline.SKIP_CREATE_PHOENIX_INDEXES, true);
+    }
+
     @Test
     public void testNamespace() throws Exception {
-        HadoopVariantStorageEngine variantStorageManager = getVariantStorageManager();
+        HadoopVariantStorageEngine variantStorageManager = getVariantStorageEngine();
         VariantHadoopDBAdaptor dbAdaptor = variantStorageManager.getDBAdaptor();
         Admin admin = dbAdaptor.getConnection().getAdmin();
 //        admin.createNamespace(NamespaceDescriptor.create("opencga").build());
@@ -75,13 +82,13 @@ public class VariantHadoopNamespaceTest extends VariantStorageBaseTest implement
 
     @Test
     public void testNoNamespace() throws Exception {
-        runDefaultETL(smallInputUri, getVariantStorageManager(), newStudyConfiguration(),
+        runDefaultETL(smallInputUri, getVariantStorageEngine(), newStudyConfiguration(),
                 new ObjectMap()
                         .append(HadoopVariantStorageEngine.OPENCGA_STORAGE_HADOOP_VARIANT_HBASE_NAMESPACE, "")
                         .append(VariantStorageEngine.Options.ANNOTATE.key(), true)
                         .append(VariantStorageEngine.Options.CALCULATE_STATS.key(), true));
 
-        HadoopVariantStorageEngine variantStorageManager = getVariantStorageManager();
+        HadoopVariantStorageEngine variantStorageManager = getVariantStorageEngine();
         Admin admin = variantStorageManager.getDBAdaptor().getConnection().getAdmin();
 
         for (NamespaceDescriptor namespaceDescriptor : admin.listNamespaceDescriptors()) {

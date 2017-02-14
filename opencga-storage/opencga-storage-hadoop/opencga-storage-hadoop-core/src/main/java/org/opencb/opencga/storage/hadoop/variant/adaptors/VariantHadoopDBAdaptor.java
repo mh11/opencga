@@ -28,20 +28,23 @@ import org.opencb.biodata.models.core.Region;
 import org.opencb.biodata.models.variant.Variant;
 import org.opencb.biodata.models.variant.avro.AdditionalAttribute;
 import org.opencb.biodata.models.variant.protobuf.VcfMeta;
+import org.opencb.cellbase.client.config.ClientConfiguration;
 import org.opencb.cellbase.client.rest.CellBaseClient;
+import org.opencb.commons.datastore.core.ObjectMap;
 import org.opencb.commons.datastore.core.Query;
 import org.opencb.commons.datastore.core.QueryOptions;
 import org.opencb.commons.datastore.core.QueryResult;
 import org.opencb.commons.io.DataWriter;
+import org.opencb.opencga.core.results.VariantQueryResult;
 import org.opencb.opencga.storage.core.config.CellBaseConfiguration;
 import org.opencb.opencga.storage.core.config.StorageConfiguration;
-import org.opencb.opencga.storage.core.config.StorageEngineConfiguration;
 import org.opencb.opencga.storage.core.exceptions.StorageEngineException;
 import org.opencb.opencga.storage.core.metadata.StudyConfiguration;
 import org.opencb.opencga.storage.core.metadata.StudyConfigurationManager;
 import org.opencb.opencga.storage.core.variant.adaptors.VariantDBAdaptor;
 import org.opencb.opencga.storage.core.variant.adaptors.VariantDBAdaptorUtils;
 import org.opencb.opencga.storage.core.variant.adaptors.VariantDBIterator;
+import org.opencb.opencga.storage.core.variant.annotation.VariantAnnotationManager;
 import org.opencb.opencga.storage.core.variant.stats.VariantStatsWrapper;
 import org.opencb.opencga.storage.hadoop.auth.HBaseCredentials;
 import org.opencb.opencga.storage.hadoop.utils.HBaseManager;
@@ -90,6 +93,7 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
     private final VariantSqlQueryParser queryParser;
     private final HadoopVariantSourceDBAdaptor variantSourceDBAdaptor;
     private final CellBaseClient cellBaseClient;
+    private boolean clientSideSkip;
 
     public VariantHadoopDBAdaptor(HBaseCredentials credentials, StorageConfiguration configuration,
                                   Configuration conf) throws IOException {
@@ -102,15 +106,23 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
         this.configuration = conf;
         this.genomeHelper = new GenomeHelper(this.configuration, connection);
         this.variantTable = credentials.getTable();
-        StorageEngineConfiguration storageEngine = configuration.getStorageEngine(HadoopVariantStorageEngine.STORAGE_ENGINE_ID);
+        ObjectMap options = configuration.getStorageEngine(HadoopVariantStorageEngine.STORAGE_ENGINE_ID).getVariant().getOptions();
         this.studyConfigurationManager.set(
-                new HBaseStudyConfigurationManager(genomeHelper, credentials.getTable(), conf, storageEngine.getVariant().getOptions()));
+                new HBaseStudyConfigurationManager(genomeHelper, credentials.getTable(), conf, options));
         this.variantSourceDBAdaptor = new HadoopVariantSourceDBAdaptor(this.genomeHelper);
 
+        String species = options.getString(VariantAnnotationManager.SPECIES);
+        String assembly = options.getString(VariantAnnotationManager.ASSEMBLY);
         CellBaseConfiguration cellbaseConfiguration = configuration.getCellbase();
-        cellBaseClient = new CellBaseClient(cellbaseConfiguration.toClientConfiguration());
+        ClientConfiguration clientConfiguration = cellbaseConfiguration.toClientConfiguration();
+        if (StringUtils.isEmpty(species)) {
+            species = clientConfiguration.getDefaultSpecies();
+        }
+        cellBaseClient = new CellBaseClient(species, assembly, clientConfiguration);
 
-        this.queryParser = new VariantSqlQueryParser(genomeHelper, this.variantTable, new VariantDBAdaptorUtils(this), cellBaseClient);
+        clientSideSkip = !options.getBoolean(PhoenixHelper.PHOENIX_SERVER_OFFSET_AVAILABLE, true);
+        this.queryParser = new VariantSqlQueryParser(genomeHelper, this.variantTable, new VariantDBAdaptorUtils(this),
+                clientSideSkip);
 
         phoenixHelper = new VariantPhoenixHelper(genomeHelper);
     }
@@ -250,7 +262,7 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
     }
 
     @Override
-    public QueryResult<Variant> get(Query query, QueryOptions options) {
+    public VariantQueryResult<Variant> get(Query query, QueryOptions options) {
 
         List<Variant> variants = new LinkedList<>();
         VariantDBIterator iterator = iterator(query, options);
@@ -283,13 +295,14 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
             }
         }
 
-        return new QueryResult<>("getVariants", ((int) iterator.getTimeFetching()), variants.size(), numTotalResults,
-                warn, error, variants);
+        Map<String, List<String>> samples = getDBAdaptorUtils().getSamplesMetadata(query, options);
+        return new VariantQueryResult<>("getVariants", ((int) iterator.getTimeFetching()), variants.size(), numTotalResults,
+                warn, error, variants, samples);
     }
 
     @Override
-    public List<QueryResult<Variant>> get(List<Query> queries, QueryOptions options) {
-        List<QueryResult<Variant>> results = new ArrayList<>(queries.size());
+    public List<VariantQueryResult<Variant>> get(List<Query> queries, QueryOptions options) {
+        List<VariantQueryResult<Variant>> results = new ArrayList<>(queries.size());
         for (Query query : queries) {
             results.add(get(query, options));
         }
@@ -297,7 +310,8 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
     }
 
     @Override
-    public QueryResult<Variant> getPhased(String variant, String studyName, String sampleName, QueryOptions options, int windowsSize) {
+    public VariantQueryResult<Variant> getPhased(String variant, String studyName, String sampleName, QueryOptions options,
+                                                 int windowsSize) {
         throw new UnsupportedOperationException("Unimplemented");
     }
 
@@ -402,13 +416,6 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
             }
         } else {
 
-            int limit = options.getInt(QueryOptions.LIMIT, -1);
-            int skip = options.getInt(QueryOptions.SKIP, -1);
-            // Increment the limit with the skip to do a client side skip
-            if (limit > 0 && skip > 0) {
-                options = new QueryOptions(options);
-                options.put(QueryOptions.LIMIT, limit + skip);
-            }
             logger.debug("Table name = " + variantTable);
             String sql = queryParser.parse(query, options);
             logger.info(sql);
@@ -426,8 +433,14 @@ public class VariantHadoopDBAdaptor implements VariantDBAdaptor {
                 VariantHBaseResultSetIterator iterator = new VariantHBaseResultSetIterator(statement,
                         resultSet, genomeHelper, getStudyConfigurationManager(), options, returnedSamples);
 
-                // Client side skip!
-                iterator.skip(skip);
+                if (clientSideSkip) {
+                    // Client side skip!
+                    int skip = options.getInt(QueryOptions.SKIP, -1);
+                    if (skip > 0) {
+                        logger.info("Client side skip! skip = {}", skip);
+                        iterator.skip(skip);
+                    }
+                }
                 return iterator;
             } catch (SQLException e) {
                 throw new RuntimeException(e);

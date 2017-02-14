@@ -16,6 +16,9 @@
 
 package org.opencb.opencga.storage.mongodb.variant;
 
+import org.apache.log4j.ConsoleAppender;
+import org.apache.log4j.Level;
+import org.apache.log4j.LogManager;
 import org.opencb.biodata.models.variant.VariantSource;
 import org.opencb.biodata.models.variant.avro.VariantType;
 import org.opencb.commons.datastore.mongodb.MongoDataStoreManager;
@@ -40,7 +43,7 @@ public interface MongoDBVariantStorageTest extends VariantStorageTest {
     AtomicReference<MongoDBVariantStorageEngine> manager = new AtomicReference<>(null);
     List<MongoDBVariantStorageEngine> managers = Collections.synchronizedList(new ArrayList<>());
 
-    default MongoDBVariantStorageEngine getVariantStorageManager() throws Exception {
+    default MongoDBVariantStorageEngine getVariantStorageEngine() throws Exception {
         synchronized (manager) {
             MongoDBVariantStorageEngine storageManager = manager.get();
             if (storageManager == null) {
@@ -78,7 +81,7 @@ public interface MongoDBVariantStorageTest extends VariantStorageTest {
     }
 
     default void clearDB(String dbName) throws Exception {
-        MongoCredentials credentials = getVariantStorageManager().getMongoCredentials(dbName);
+        MongoCredentials credentials = getVariantStorageEngine().getMongoCredentials(dbName);
         logger.info("Cleaning MongoDB {}", credentials.getMongoDbName());
         try (MongoDataStoreManager mongoManager = new MongoDataStoreManager(credentials.getDataStoreServerAddresses())) {
             mongoManager.get(credentials.getMongoDbName(), credentials.getMongoDBConfiguration());
@@ -95,7 +98,18 @@ public interface MongoDBVariantStorageTest extends VariantStorageTest {
 
 
     default MongoDataStoreManager getMongoDataStoreManager(String dbName) throws Exception {
-        MongoCredentials credentials = getVariantStorageManager().getMongoCredentials(dbName);
+        MongoCredentials credentials = getVariantStorageEngine().getMongoCredentials(dbName);
         return new MongoDataStoreManager(credentials.getDataStoreServerAddresses());
+    }
+
+    default void logLevelDebug() {
+        ConsoleAppender stderr = (ConsoleAppender) LogManager.getRootLogger().getAppender("stderr");
+        stderr.setThreshold(Level.toLevel("debug"));
+        org.apache.log4j.Logger.getLogger("org.mongodb.driver.cluster").setLevel(Level.WARN);
+        org.apache.log4j.Logger.getLogger("org.mongodb.driver.connection").setLevel(Level.WARN);
+        org.apache.log4j.Logger.getLogger("org.mongodb.driver.protocol.update").setLevel(Level.WARN);
+        org.apache.log4j.Logger.getLogger("org.mongodb.driver.protocol.command").setLevel(Level.WARN);
+        org.apache.log4j.Logger.getLogger("org.mongodb.driver.protocol.query").setLevel(Level.WARN);
+        org.apache.log4j.Logger.getLogger("org.mongodb.driver.protocol.getmore").setLevel(Level.WARN);
     }
 }

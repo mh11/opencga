@@ -37,7 +37,7 @@ import org.opencb.opencga.catalog.managers.CatalogManager;
 import org.opencb.opencga.catalog.models.*;
 import org.opencb.opencga.catalog.utils.FileMetadataReader;
 import org.opencb.opencga.storage.core.StoragePipelineResult;
-import org.opencb.opencga.storage.core.StorageManagerFactory;
+import org.opencb.opencga.storage.core.StorageEngineFactory;
 import org.opencb.opencga.storage.core.config.DatabaseCredentials;
 import org.opencb.opencga.storage.core.config.StorageConfiguration;
 import org.opencb.opencga.storage.core.config.StorageEngineConfiguration;
@@ -132,7 +132,7 @@ public abstract class AbstractVariantStorageOperationTest extends GenericTest {
                 new StorageEtlConfiguration(DummyVariantStorageEngine.class.getName(), new ObjectMap(), new DatabaseCredentials()),
                 new ObjectMap()
         ));
-        StorageManagerFactory factory = StorageManagerFactory.get(storageConfiguration);
+        StorageEngineFactory factory = StorageEngineFactory.get(storageConfiguration);
         factory.unregisterVariantStorageManager(DummyVariantStorageEngine.STORAGE_ENGINE_ID);
 
         DummyStudyConfigurationManager.clear();
@@ -154,14 +154,16 @@ public abstract class AbstractVariantStorageOperationTest extends GenericTest {
                 Collections.singletonMap(VariantStorageEngine.Options.AGGREGATED_TYPE.key(), getAggregation()),
                 null, sessionId).first().getId();
         studyStr = String.valueOf(studyId);
-        outputId = catalogManager.createFolder(studyId, Paths.get("data", "index"), true, null, sessionId).first().getId();
+        outputId = catalogManager.getFileManager().createFolder(studyStr, Paths.get("data", "index").toString(), null,  true, null,
+                QueryOptions.empty(), sessionId).first().getId();
         outputStr = String.valueOf(outputId);
         outputPath = "data/index/";
         studyId2 = catalogManager.createStudy(projectId, "s2", "s2", Study.Type.CASE_CONTROL, null, "Study 2", null,
                 null, null, null, Collections.singletonMap(File.Bioformat.VARIANT, new DataStore(getStorageEngine(), dbName)), null,
                 Collections.singletonMap(VariantStorageEngine.Options.AGGREGATED_TYPE.key(), getAggregation()),
                 null, sessionId).first().getId();
-        outputId2 = catalogManager.createFolder(studyId2, Paths.get("data", "index"), true, null, sessionId).first().getId();
+        outputId2 = catalogManager.getFileManager().createFolder(Long.toString(studyId2), Paths.get("data", "index").toString(), null,
+                true, null, QueryOptions.empty(), sessionId).first().getId();
 
         files = Arrays.asList(new File[5]);
     }
@@ -332,7 +334,7 @@ public abstract class AbstractVariantStorageOperationTest extends GenericTest {
     protected DummyVariantStorageEngine mockVariantStorageManager() {
         DummyVariantStorageEngine vsm = spy(new DummyVariantStorageEngine());
         vsm.setConfiguration(opencga.getStorageConfiguration(), DummyVariantStorageEngine.STORAGE_ENGINE_ID);
-        StorageManagerFactory.get(opencga.getStorageConfiguration()).registerStorageManager(vsm);
+        StorageEngineFactory.get(opencga.getStorageConfiguration()).registerStorageManager(vsm);
         return vsm;
     }
 

@@ -40,7 +40,7 @@ import org.opencb.opencga.catalog.exceptions.CatalogException;
 import org.opencb.opencga.catalog.managers.CatalogManager;
 import org.opencb.opencga.core.common.Config;
 import org.opencb.opencga.core.exception.VersionException;
-import org.opencb.opencga.storage.core.StorageManagerFactory;
+import org.opencb.opencga.storage.core.StorageEngineFactory;
 import org.opencb.opencga.storage.core.alignment.json.AlignmentDifferenceJsonMixin;
 import org.opencb.opencga.storage.core.config.StorageConfiguration;
 import org.opencb.opencga.storage.core.manager.variant.VariantStorageManager;
@@ -129,7 +129,7 @@ public class OpenCGAWSServer {
     protected static CatalogManager catalogManager;
 
     protected static StorageConfiguration storageConfiguration;
-    protected static StorageManagerFactory storageManagerFactory;
+    protected static StorageEngineFactory storageEngineFactory;
     protected static VariantStorageManager variantManager;
 
     private static final int DEFAULT_LIMIT = 2000;
@@ -244,8 +244,8 @@ public class OpenCGAWSServer {
             logger.info("|  * Storage configuration file: '{}'", configDir.toFile().getAbsolutePath() + "/storage-configuration.yml");
             storageConfiguration = StorageConfiguration
                     .load(new FileInputStream(new File(configDir.toFile().getAbsolutePath() + "/storage-configuration.yml")));
-            storageManagerFactory = StorageManagerFactory.get(storageConfiguration);
-            variantManager = new VariantStorageManager(catalogManager, storageManagerFactory);
+            storageEngineFactory = StorageEngineFactory.get(storageConfiguration);
+            variantManager = new VariantStorageManager(catalogManager, storageEngineFactory);
         } catch (IOException e) {
             e.printStackTrace();
         } catch (CatalogException e) {
@@ -340,6 +340,9 @@ public class OpenCGAWSServer {
         MultivaluedMap<String, String> multivaluedMap = uriInfo.getQueryParameters();
         queryOptions.put("metadata", multivaluedMap.get("metadata") == null || multivaluedMap.get("metadata").get(0).equals("true"));
 
+        // By default, we will avoid counting the number of documents unless explicitly specified.
+        queryOptions.put(QueryOptions.SKIP_COUNT, true);
+
         // Add all the others QueryParams from the URL
         for (Map.Entry<String, List<String>> entry : multivaluedMap.entrySet()) {
             String value =  entry.getValue().get(0);
@@ -361,6 +364,9 @@ public class OpenCGAWSServer {
                     break;
                 case QueryOptions.ORDER:
                     queryOptions.put(entry.getKey(), value);
+                    break;
+                case QueryOptions.SKIP_COUNT:
+                    queryOptions.put(QueryOptions.SKIP_COUNT, Boolean.parseBoolean(value));
                     break;
                 case "count":
                     count = Boolean.parseBoolean(value);

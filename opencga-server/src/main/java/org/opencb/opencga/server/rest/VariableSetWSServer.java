@@ -18,8 +18,10 @@ package org.opencb.opencga.server.rest;
 
 import io.swagger.annotations.*;
 import org.apache.commons.lang3.StringUtils;
+import org.opencb.commons.datastore.core.QueryOptions;
 import org.opencb.commons.datastore.core.QueryResult;
 import org.opencb.opencga.catalog.db.api.SampleDBAdaptor;
+import org.opencb.opencga.catalog.db.api.StudyDBAdaptor;
 import org.opencb.opencga.catalog.models.Variable;
 import org.opencb.opencga.catalog.models.VariableSet;
 import org.opencb.opencga.catalog.models.summaries.VariableSetSummary;
@@ -60,7 +62,7 @@ public class VariableSetWSServer extends OpenCGAWSServer {
     @Consumes(MediaType.APPLICATION_JSON)
     @ApiOperation(value = "Create variable set", position = 1, response = VariableSet.class)
     public Response createSet(
-            @ApiParam(value = "DEPRECATED: studyId", required = true) @QueryParam("studyId") String studyIdStr,
+            @ApiParam(value = "DEPRECATED: studyId", hidden = true) @QueryParam("studyId") String studyIdStr,
             @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias") @QueryParam("study")
                     String studyStr,
             @ApiParam(value="JSON containing the variableSet information", required = true) VariableSetParameters params) {
@@ -125,20 +127,26 @@ public class VariableSetWSServer extends OpenCGAWSServer {
             @ApiImplicitParam(name = "skip", value = "Number of results to skip in the queries", dataType = "integer", paramType = "query"),
             @ApiImplicitParam(name = "count", value = "Total number of results. [PENDING]", dataType = "boolean", paramType = "query")
     })
-    public Response search(@ApiParam(value = "studyId", required = true) @QueryParam("studyId") String studyIdStr,
-                           @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias")
-                                @QueryParam("study") String studyStr,
+    public Response search(@ApiParam(value = "studyId") @QueryParam("studyId") String studyIdStr,
+                           @ApiParam(value = "Study [[user@]project:]study where study and project can be either the id or alias",
+                                   required = true) @QueryParam("study") String studyStr,
                            @ApiParam(value = "CSV list of variablesetIds", required = false) @QueryParam("id") String id,
                            @ApiParam(value = "name", required = false) @QueryParam("name") String name,
                            @ApiParam(value = "description", required = false) @QueryParam("description") String description,
-                           @ApiParam(value = "attributes", required = false) @QueryParam("attributes") String attributes) {
+                           @ApiParam(value = "attributes", required = false) @QueryParam("attributes") String attributes,
+                           @ApiParam(value = "Skip count", defaultValue = "false") @QueryParam("skipCount") boolean skipCount) {
         try {
+            queryOptions.put(QueryOptions.SKIP_COUNT, skipCount);
+
             if (StringUtils.isNotEmpty(studyIdStr)) {
                 studyStr = studyIdStr;
             }
-            long studyId = catalogManager.getStudyId(studyStr, sessionId);
-            queryOptions.put(SampleDBAdaptor.QueryParams.STUDY_ID.key(), studyId);
-            QueryResult<VariableSet> queryResult = catalogManager.getAllVariableSet(studyId, queryOptions, sessionId);
+            if (StringUtils.isNotEmpty(query.getString("study"))) {
+                query.remove("study");
+            }
+
+            QueryResult<VariableSet> queryResult = catalogManager.getStudyManager().searchVariableSets(studyStr, query, queryOptions,
+                    sessionId);
             return createOkResponse(queryResult);
         } catch (Exception e) {
             return createErrorResponse(e);

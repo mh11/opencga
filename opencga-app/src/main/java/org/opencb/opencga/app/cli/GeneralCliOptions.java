@@ -53,8 +53,8 @@ public class GeneralCliOptions {
         @Parameter(names = {"--log-file"}, description = "Set the file to write the log")
         public String logFile;
 
-        @Parameter(names = {"-C", "--conf"}, description = "Configuration folder that contains opencga.yml, catalog-configuration.yaml, "
-                + "storage-configuration.yml and client-configuration.yaml files.")
+        @Parameter(names = {"-C", "--conf"}, description = "Configuration folder that contains configuration.yml, "
+                + "storage-configuration.yml and client-configuration.yml files.")
         public String conf;
 
         @Deprecated
@@ -108,10 +108,10 @@ public class GeneralCliOptions {
     public static class NumericOptions {
 
         @Parameter(names = {"--skip"}, description = "Number of results to skip", arity = 1)
-        public String skip;
+        public int skip;
 
         @Parameter(names = {"--limit"}, description = "Maximum number of results to be returned", arity = 1)
-        public String limit;
+        public int limit;
 
         @Parameter(names = {"--count"}, description = "Total number of results. Default = false", arity = 0)
         public boolean count;

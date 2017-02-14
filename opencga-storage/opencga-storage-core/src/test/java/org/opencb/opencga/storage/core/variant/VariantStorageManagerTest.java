@@ -18,6 +18,7 @@ package org.opencb.opencga.storage.core.variant;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.avro.generic.GenericRecord;
 import org.junit.Ignore;
@@ -41,6 +42,8 @@ import org.opencb.opencga.storage.core.variant.io.VariantReaderUtils;
 import org.opencb.opencga.storage.core.variant.io.json.mixin.GenericRecordAvroJsonMixin;
 import org.opencb.opencga.storage.core.variant.io.json.mixin.VariantStatsJsonMixin;
 import org.opencb.opencga.storage.core.variant.stats.VariantStatsWrapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -58,11 +61,12 @@ import static org.junit.Assert.*;
 @Ignore
 public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
 
+    private static Logger logger = LoggerFactory.getLogger(VariantStorageManagerTest.class);
     @Test
     public void basicIndex() throws Exception {
         clearDB(DB_NAME);
         StudyConfiguration studyConfiguration = newStudyConfiguration();
-        StoragePipelineResult etlResult = runDefaultETL(inputUri, variantStorageManager, studyConfiguration,
+        StoragePipelineResult etlResult = runDefaultETL(smallInputUri, variantStorageManager, studyConfiguration,
                 new ObjectMap(VariantStorageEngine.Options.TRANSFORM_FORMAT.key(), "json"));
         assertTrue("Incorrect transform file extension " + etlResult.getTransformResult() + ". Expected 'variants.json.gz'",
                 Paths.get(etlResult.getTransformResult()).toFile().getName().endsWith("variants.json.gz"));
@@ -77,7 +81,7 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
     public void avroBasicIndex() throws Exception {
         clearDB(DB_NAME);
         StudyConfiguration studyConfiguration = newStudyConfiguration();
-        StoragePipelineResult etlResult = runDefaultETL(inputUri, variantStorageManager, studyConfiguration,
+        StoragePipelineResult etlResult = runDefaultETL(smallInputUri, variantStorageManager, studyConfiguration,
                 new ObjectMap(VariantStorageEngine.Options.TRANSFORM_FORMAT.key(), "avro"));
         assertTrue("Incorrect transform file extension " + etlResult.getTransformResult() + ". Expected 'variants.avro.gz'",
                 Paths.get(etlResult.getTransformResult()).toFile().getName().endsWith("variants.avro.gz"));
@@ -176,24 +180,31 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
 
     @Test
     public void multiIndexPlatinum() throws Exception {
+        multiIndexPlatinum(new ObjectMap());
+    }
+
+    public void multiIndexPlatinum(ObjectMap options) throws Exception {
         clearDB(DB_NAME);
         // each sample
         StudyConfiguration studyConfigurationMultiFile = new StudyConfiguration(1, "multi");
         StudyConfiguration studyConfigurationBatchFile = new StudyConfiguration(2, "batch");
 
-        ObjectMap options = new ObjectMap()
-                .append(VariantStorageEngine.Options.STUDY_TYPE.key(), VariantStudy.StudyType.CONTROL)
-                .append(VariantStorageEngine.Options.CALCULATE_STATS.key(), false)
-                .append(VariantStorageEngine.Options.ANNOTATE.key(), false);
+        options.putIfAbsent(VariantStorageEngine.Options.STUDY_TYPE.key(), VariantStudy.StudyType.COLLECTION);
+        options.putIfAbsent(VariantStorageEngine.Options.CALCULATE_STATS.key(), false);
+        options.putIfAbsent(VariantStorageEngine.Options.ANNOTATE.key(), false);
+        options.put(VariantStorageEngine.Options.DB_NAME.key(), DB_NAME);
 
-        VariantStorageEngine variantStorageManager = getVariantStorageManager();
+        VariantStorageEngine variantStorageManager = getVariantStorageEngine();
         VariantDBAdaptor dbAdaptor = variantStorageManager.getDBAdaptor(DB_NAME);
         StudyConfigurationManager studyConfigurationManager = dbAdaptor.getStudyConfigurationManager();
         int i = 0;
         for (int fileId = 77; fileId <= 93; fileId++) {
-            options.append(VariantStorageEngine.Options.SAMPLE_IDS.key(), "NA128" + fileId + ":" + i);
+            ObjectMap fileOptions = new ObjectMap();
+            fileOptions.append(VariantStorageEngine.Options.SAMPLE_IDS.key(), "NA128" + fileId + ':' + i)
+                    .append(VariantStorageEngine.Options.FILE_ID.key(), i)
+                    .putAll(options);
             runDefaultETL(getResourceUri("platinum/1K.end.platinum-genomes-vcf-NA128" + fileId + "_S1.genome.vcf.gz"),
-                    variantStorageManager, studyConfigurationMultiFile, options.append(VariantStorageEngine.Options.FILE_ID.key(), i));
+                    variantStorageManager, studyConfigurationMultiFile, fileOptions);
             studyConfigurationMultiFile = studyConfigurationManager.getStudyConfiguration(studyConfigurationMultiFile.getStudyId(), null).first();
             assertTrue(studyConfigurationMultiFile.getIndexedFiles().contains(i));
             i++;
@@ -205,13 +216,11 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
             uris.add(getResourceUri("platinum/1K.end.platinum-genomes-vcf-NA128" + fileId + "_S1.genome.vcf.gz"));
         }
 
-        variantStorageManager = getVariantStorageManager();
+        variantStorageManager = getVariantStorageEngine();
         variantStorageManager.getConfiguration().getStorageEngine(variantStorageManager.getStorageEngineId()).getVariant().getOptions()
                 .append(VariantStorageEngine.Options.STUDY_NAME.key(), studyConfigurationBatchFile.getStudyName())
                 .append(VariantStorageEngine.Options.STUDY_ID.key(), studyConfigurationBatchFile.getStudyId())
-                .append(VariantStorageEngine.Options.DB_NAME.key(), DB_NAME)
-                .append(VariantStorageEngine.Options.ANNOTATE.key(), false)
-                .append("merge", false);
+                .putAll(options);
 
         List<StoragePipelineResult> results = variantStorageManager.index(uris, outputUri, true, true, true);
 
@@ -271,7 +280,7 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
                 .append(VariantStorageEngine.Options.CALCULATE_STATS.key(), true)
                 .append(VariantStorageEngine.Options.ANNOTATE.key(), false);
 
-        VariantStorageEngine variantStorageManager = getVariantStorageManager();
+        VariantStorageEngine variantStorageManager = getVariantStorageEngine();
 
         URI chr1 = getResourceUri("1k.chr1.phase3_shapeit2_mvncall_integrated_v5.20130502.genotypes.vcf.gz");
         URI chr22 = getResourceUri("10k.chr22.phase3_shapeit2_mvncall_integrated_v5.20130502.genotypes.vcf.gz");
@@ -322,14 +331,14 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
         assertTrue(studyConfiguration.getCohorts().containsKey(defaultCohortId));
         assertEquals(2504, studyConfiguration.getCohorts().get(defaultCohortId).size());
         assertTrue(studyConfiguration.getIndexedFiles().contains(5));
-        checkLoadedVariants(getVariantStorageManager().getDBAdaptor(DB_NAME), studyConfiguration, true, false, -1);
+        checkLoadedVariants(getVariantStorageEngine().getDBAdaptor(DB_NAME), studyConfiguration, true, false, -1);
 
         runDefaultETL(getResourceUri("10k.chr22.phase3_shapeit2_mvncall_integrated_v5.20130502.genotypes.vcf.gz"), variantStorageManager,
 //        runDefaultETL(getResourceUri("1k.chr21.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz"), variantStorageManager,
                 studyConfiguration, options.append(VariantStorageEngine.Options.FILE_ID.key(), 6));
 
         assertTrue(studyConfiguration.getIndexedFiles().contains(6));
-        checkLoadedVariants(getVariantStorageManager().getDBAdaptor(DB_NAME), studyConfiguration, true, false, -1);
+        checkLoadedVariants(getVariantStorageEngine().getDBAdaptor(DB_NAME), studyConfiguration, true, false, -1);
 
         assertEquals(studyConfiguration.getSamplesInFiles().get(5), studyConfiguration.getSamplesInFiles().get(6));
 
@@ -385,7 +394,7 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
 //        params.put(VariantStorageEngine.Options.INCLUDE_SRC.key(), true);
         params.put(VariantStorageEngine.Options.DB_NAME.key(), DB_NAME);
         StoragePipelineResult etlResult = runETL(variantStorageManager, params, true, true, true);
-        VariantDBAdaptor dbAdaptor = getVariantStorageManager().getDBAdaptor(DB_NAME);
+        VariantDBAdaptor dbAdaptor = getVariantStorageEngine().getDBAdaptor(DB_NAME);
         studyConfiguration = dbAdaptor.getStudyConfigurationManager().getStudyConfiguration(studyConfiguration.getStudyId(), null).first();
 
         assertTrue("Incorrect transform file extension " + etlResult.getTransformResult() + ". Expected 'variants.json.gz'",
@@ -420,7 +429,7 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
         StoragePipelineResult etlResult = runETL(variantStorageManager, params, true, true, true);
 
         System.out.println("etlResult = " + etlResult);
-        VariantDBAdaptor dbAdaptor = getVariantStorageManager().getDBAdaptor(DB_NAME);
+        VariantDBAdaptor dbAdaptor = getVariantStorageEngine().getDBAdaptor(DB_NAME);
         studyConfiguration = dbAdaptor.getStudyConfigurationManager().getStudyConfiguration(studyConfiguration.getStudyId(), null).first();
 
         assertTrue("Incorrect transform file extension " + etlResult.getTransformResult() + ". Expected 'variants.avro.snappy'",
@@ -438,7 +447,7 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
         //GT:DS:GL
 
         StudyConfiguration studyConfiguration = newStudyConfiguration();
-        StoragePipelineResult etlResult = runDefaultETL(smallInputUri, getVariantStorageManager(), studyConfiguration,
+        StoragePipelineResult etlResult = runDefaultETL(smallInputUri, getVariantStorageEngine(), studyConfiguration,
                 new ObjectMap(VariantStorageEngine.Options.EXTRA_GENOTYPE_FIELDS.key(), Arrays.asList("GL", "DS"))
                         .append(VariantStorageEngine.Options.FILE_ID.key(), 2)
                         .append(VariantStorageEngine.Options.ANNOTATE.key(), false)
@@ -464,12 +473,17 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
             studyEntry.getFiles().get(0).setFileId("2");
             variant.setStudies(Collections.singletonList(studyEntry));
 
-            Variant loadedVariant = dbAdaptor.get(new Query(VariantDBAdaptor.VariantQueryParams.ID.key(), variant), new QueryOptions()).first();
+            Variant loadedVariant = dbAdaptor.get(new Query(VariantDBAdaptor.VariantQueryParams.ID.key(), variant.toString()), new QueryOptions()).first();
 
             loadedVariant.setAnnotation(null);                                          //Remove annotation
-            loadedVariant.getStudy(STUDY_NAME).setStats(Collections.emptyMap());        //Remove calculated stats
-            loadedVariant.getStudy(STUDY_NAME).getSamplesData().forEach(values -> {
+            StudyEntry loadedStudy = loadedVariant.getStudy(STUDY_NAME);
+            loadedStudy.setFormat(Arrays.asList(loadedStudy.getFormat().get(0), loadedStudy.getFormat().get(2), loadedStudy.getFormat().get(1)));
+            loadedStudy.setStats(Collections.emptyMap());        //Remove calculated stats
+            loadedStudy.getSamplesData().forEach(values -> {
                 values.set(0, values.get(0).replace("0/0", "0|0"));
+                String v1 = values.get(1);
+                values.set(1, values.get(2));
+                values.set(2, v1);
                 while (values.get(2).length() < 5) values.set(2, values.get(2) + "0");   //Set lost zeros
             });
             variant.resetLength();
@@ -486,13 +500,13 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
     public void indexWithOtherFieldsNoGT() throws Exception {
         //GL:DP:GU:TU:AU:CU
         StudyConfiguration studyConfiguration = newStudyConfiguration();
-        StoragePipelineResult etlResult = runDefaultETL(getResourceUri("variant-test-somatic.vcf"), getVariantStorageManager(), studyConfiguration,
+        StoragePipelineResult etlResult = runDefaultETL(getResourceUri("variant-test-somatic.vcf"), getVariantStorageEngine(), studyConfiguration,
                 new ObjectMap(VariantStorageEngine.Options.EXTRA_GENOTYPE_FIELDS.key(), Arrays.asList("GL", "DP", "AU", "CU", "GU", "TU"))
                         .append(VariantStorageEngine.Options.FILE_ID.key(), 2)
                         .append(VariantStorageEngine.Options.ANNOTATE.key(), false)
         );
 
-        VariantDBIterator iterator = getVariantStorageManager().getDBAdaptor(DB_NAME).iterator(new Query(VariantDBAdaptor.VariantQueryParams.UNKNOWN_GENOTYPE.key(), "./."), new QueryOptions());
+        VariantDBIterator iterator = getVariantStorageEngine().getDBAdaptor(DB_NAME).iterator(new Query(VariantDBAdaptor.VariantQueryParams.UNKNOWN_GENOTYPE.key(), "./."), new QueryOptions());
         while (iterator.hasNext()) {
             Variant variant = iterator.next();
             assertEquals("./.", variant.getStudy(STUDY_NAME).getSampleData("SAMPLE_1", "GT"));
@@ -511,7 +525,7 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
         //GL:DP:GU:TU:AU:CU
         StudyConfiguration studyConfiguration = newStudyConfiguration();
         List<String> extraFields = Arrays.asList("GL", "DP", "AU", "CU", "GU", "TU");
-        StoragePipelineResult etlResult = runDefaultETL(getResourceUri("variant-test-somatic.vcf"), getVariantStorageManager(), studyConfiguration,
+        StoragePipelineResult etlResult = runDefaultETL(getResourceUri("variant-test-somatic.vcf"), getVariantStorageEngine(), studyConfiguration,
                 new ObjectMap(VariantStorageEngine.Options.EXTRA_GENOTYPE_FIELDS.key(), extraFields)
                         .append(VariantStorageEngine.Options.EXTRA_GENOTYPE_FIELDS_COMPRESS.key(), false)
                         .append(VariantStorageEngine.Options.EXCLUDE_GENOTYPES.key(), true)
@@ -519,7 +533,7 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
                         .append(VariantStorageEngine.Options.FILE_ID.key(), 2)
                         .append(VariantStorageEngine.Options.ANNOTATE.key(), false)
         );
-        etlResult = runDefaultETL(getResourceUri("variant-test-somatic_2.vcf"), getVariantStorageManager(), studyConfiguration,
+        etlResult = runDefaultETL(getResourceUri("variant-test-somatic_2.vcf"), getVariantStorageEngine(), studyConfiguration,
                 new ObjectMap(VariantStorageEngine.Options.EXTRA_GENOTYPE_FIELDS.key(), extraFields)
                         .append(VariantStorageEngine.Options.EXTRA_GENOTYPE_FIELDS_COMPRESS.key(), true)
                         .append(VariantStorageEngine.Options.EXCLUDE_GENOTYPES.key(), false)
@@ -527,7 +541,7 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
                         .append(VariantStorageEngine.Options.FILE_ID.key(), 3)
                         .append(VariantStorageEngine.Options.ANNOTATE.key(), false)
         );
-        VariantDBAdaptor dbAdaptor = getVariantStorageManager().getDBAdaptor(DB_NAME);
+        VariantDBAdaptor dbAdaptor = getVariantStorageEngine().getDBAdaptor(DB_NAME);
         studyConfiguration = dbAdaptor.getStudyConfigurationManager().getStudyConfiguration(studyConfiguration.getStudyId(), null).first();
         assertEquals(true, studyConfiguration.getAttributes().getBoolean(VariantStorageEngine.Options.EXCLUDE_GENOTYPES.key(), false));
         assertEquals(extraFields, studyConfiguration.getAttributes().getAsStringList(VariantStorageEngine.Options.EXTRA_GENOTYPE_FIELDS.key()));
@@ -838,6 +852,7 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
 
 
     @Test
+    @Ignore
     public void insertVariantIntoSolr() throws Exception {
         clearDB(DB_NAME);
         ObjectMap params = new ObjectMap();
@@ -854,7 +869,7 @@ public abstract class VariantStorageManagerTest extends VariantStorageBaseTest {
         params.put(VariantStorageEngine.Options.ANNOTATE.key(), true);
         runETL(variantStorageManager, params, true, true, true);
 
-        VariantDBAdaptor dbAdaptor = getVariantStorageManager().getDBAdaptor(DB_NAME);
+        VariantDBAdaptor dbAdaptor = getVariantStorageEngine().getDBAdaptor(DB_NAME);
 
 
         SearchManager searchManager = new SearchManager(variantStorageManager.getConfiguration());

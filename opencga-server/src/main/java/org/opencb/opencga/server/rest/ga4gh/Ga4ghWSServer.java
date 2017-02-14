@@ -185,7 +185,7 @@ public class Ga4ghWSServer extends OpenCGAWSServer {
 
             SearchReadsResponse response = new SearchReadsResponse();
 
-            AlignmentStorageManager alignmentStorageManager = new AlignmentStorageManager(catalogManager, storageManagerFactory);
+            AlignmentStorageManager alignmentStorageManager = new AlignmentStorageManager(catalogManager, storageEngineFactory);
 
             QueryResult<ReadAlignment> queryResult = alignmentStorageManager
                     .query("", request.getReadGroupIds().get(0), query, queryOptions, sessionId);
@@ -198,28 +198,5 @@ public class Ga4ghWSServer extends OpenCGAWSServer {
             return createErrorResponse(e);
         }
     }
-
-//    @GET
-//    @Path("/variants/{id}")
-//    @Consumes(MediaType.APPLICATION_JSON)
-//    @ApiOperation(value = "Description", position = 1, notes = "Notes")
-//    public Response getVariant(@PathParam("id") String id) {
-//
-//
-//        SearchVariantsResponse response = new SearchVariantsResponse();
-//        return createOkResponse(response);
-//    }
-
-
-
-//    @Path("/variantsets/search")
-//    @Path("/variantsets/{id}/sequences/search")
-//    @Path("/variantsets/{id}/sequences/{id}")
-//    @Path("/alleles/search")
-//    @Path("/alleles/{id}")
-//    @Path("/callsets/search")
-//    @Path("/callsets/{id}")
-//    @Path("/call/search")
-//    @Path("/allelecalls/search")
 
 }

@@ -10,7 +10,6 @@ import org.opencb.cellbase.core.config.Species;
 import org.opencb.cellbase.core.config.SpeciesProperties;
 import org.opencb.cellbase.core.variant.annotation.VariantAnnotationCalculator;
 import org.opencb.commons.datastore.core.ObjectMap;
-import org.opencb.commons.datastore.core.QueryOptions;
 import org.opencb.commons.datastore.core.QueryResult;
 import org.opencb.opencga.storage.core.config.StorageConfiguration;
 import org.opencb.opencga.storage.core.variant.annotation.VariantAnnotatorException;
@@ -26,14 +25,11 @@ import java.util.concurrent.ExecutionException;
  */
 public class CellBaseDirectVariantAnnotator extends AbstractCellBaseVariantAnnotator {
 
-    private final QueryOptions queryOptions = new QueryOptions("exclude", "expression");
-
     private VariantAnnotationCalculator variantAnnotationCalculator = null;
 
     public CellBaseDirectVariantAnnotator(StorageConfiguration storageConfiguration, ObjectMap options) throws VariantAnnotatorException {
         super(storageConfiguration, options);
 
-        String cellbaseVersion = storageConfiguration.getCellbase().getVersion();
         List<String> hosts = storageConfiguration.getCellbase().getHosts();
 
         CellBaseConfiguration cellBaseConfiguration = new CellBaseConfiguration();
@@ -42,7 +38,7 @@ public class CellBaseDirectVariantAnnotator extends AbstractCellBaseVariantAnnot
         Databases databases = new Databases();
         org.opencb.cellbase.core.config.DatabaseCredentials databaseCredentials
                 = new org.opencb.cellbase.core.config.DatabaseCredentials();
-        String hostsString = StringUtils.join(storageConfiguration.getCellbase().getDatabase().getHosts(), ",");
+        String hostsString = StringUtils.join(hosts, ",");
         checkNotNull(hostsString, "cellbase database host");
         databaseCredentials.setHost(hostsString);
         databaseCredentials.setPassword(storageConfiguration.getCellbase().getDatabase().getPassword());
@@ -69,6 +65,9 @@ public class CellBaseDirectVariantAnnotator extends AbstractCellBaseVariantAnnot
                 = new org.opencb.cellbase.lib.impl.MongoDBAdaptorFactory(cellBaseConfiguration);
         variantAnnotationCalculator =
                 new VariantAnnotationCalculator(species, assembly, dbAdaptorFactory);
+
+        logger.info("Annotating with Cellbase dbAdaptor. host '{}', version '{}', species '{}', assembly '{}'",
+                hostsString, cellbaseVersion, species, assembly);
 
     }
 
