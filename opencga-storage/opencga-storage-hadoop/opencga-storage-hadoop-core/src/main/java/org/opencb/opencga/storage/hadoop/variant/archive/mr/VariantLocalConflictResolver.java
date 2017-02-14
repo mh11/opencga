@@ -158,7 +158,7 @@ public class VariantLocalConflictResolver {
      * @param varToAlt Variant with a list of Alternates (Alt and SecAlts).
      * @return Set of conflicting Alts.
      */
-    public static Set<Variant> findConflictAlternates(Variant varQuery, NavigableSet<Variant> altSorted,
+    public Set<Variant> findConflictAlternates(Variant varQuery, NavigableSet<Variant> altSorted,
                              Map<AlternateWrapper, Variant> altToVar, Map<Variant, List<Variant>> varToAlt) {
 
         // Get ALTs for Variant
@@ -759,7 +759,7 @@ public class VariantLocalConflictResolver {
         }
     }
 
-    public static class AlternateWrapper {
+    public class AlternateWrapper {
         private final Variant variant;
 
         public AlternateWrapper(Variant variant) {

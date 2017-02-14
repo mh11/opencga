@@ -26,14 +26,16 @@ public class AnalysisToFileMapper extends AbstractHBaseMapReduce<Object, Object>
 
     private byte[] studiesRow;
     private VariantTableExportDriver.ExportType type;
+    protected volatile boolean withGenotype;
+    protected volatile List<String> returnedSamples;
 
     @Override
     protected void setup(Context context) throws IOException, InterruptedException {
         super.setup(context);
         studiesRow = getHelper().generateVariantRowKey(GenomeHelper.DEFAULT_METADATA_ROW_KEY, 0);
 
-        List<String> returnedSamples = Collections.singletonList("."); // No GT data by default
-        boolean withGenotype = context.getConfiguration().getBoolean(VariantTableExportDriver
+        returnedSamples = Collections.singletonList("."); // No GT data by default
+        withGenotype = context.getConfiguration().getBoolean(VariantTableExportDriver
                 .CONFIG_VARIANT_TABLE_EXPORT_AVRO_GENOTYPE, false);
         withGenotype = context.getConfiguration().getBoolean(VariantTableExportDriver
                 .CONFIG_VARIANT_TABLE_EXPORT_GENOTYPE, withGenotype);
@@ -51,8 +53,8 @@ public class AnalysisToFileMapper extends AbstractHBaseMapReduce<Object, Object>
     @Override
     protected void map(ImmutableBytesWritable key, Result value, Context context) throws IOException,
             InterruptedException {
-        if (!Bytes.startsWith(value.getRow(), this.studiesRow)) { // ignore _METADATA row
-            Variant variant = this.getHbaseToVariantConverter().convert(value);
+        if (!isMetaRow(value)) { // ignore _METADATA row
+            Variant variant = convertToVariant(value);
             switch (this.type) {
                 case AVRO:
                     context.write(new AvroKey<>(variant.getImpl()), NullWritable.get());
@@ -65,5 +67,13 @@ public class AnalysisToFileMapper extends AbstractHBaseMapReduce<Object, Object>
             }
             context.getCounter(AbstractVariantTableMapReduce.COUNTER_GROUP_NAME, this.type.name()).increment(1);
         }
+    }
+
+    protected boolean isMetaRow(Result value) {
+        return Bytes.startsWith(value.getRow(), this.studiesRow);
+    }
+
+    protected Variant convertToVariant(Result value) {
+        return this.getHbaseToVariantConverter().convert(value);
     }
 }

@@ -285,7 +285,7 @@ public class VariantPhoenixHelper {
         }
     }
 
-    private void addColumns(Connection con, String tableName, Integer studyId, PDataType<?> dataType, String ... columns)
+    public void addColumns(Connection con, String tableName, Integer studyId, PDataType<?> dataType, String ... columns)
             throws SQLException {
         for (String col : columns) {
             String sql = phoenixHelper.buildAlterAddColumn(tableName,

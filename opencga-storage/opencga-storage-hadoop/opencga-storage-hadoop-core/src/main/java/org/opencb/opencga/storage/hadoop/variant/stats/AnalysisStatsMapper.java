@@ -33,6 +33,7 @@ public class AnalysisStatsMapper extends AbstractHBaseMapReduce<ImmutableBytesWr
     private byte[] studiesRow;
     private Map<String, Set<String>> samples;
     private VariantStatsToHBaseConverter variantStatsToHBaseConverter;
+    private long prefEnd = -1;
 
     @Override
     protected void setup(Context context) throws IOException, InterruptedException {
@@ -58,23 +59,54 @@ public class AnalysisStatsMapper extends AbstractHBaseMapReduce<ImmutableBytesWr
         boolean done = false;
         if (!Bytes.startsWith(value.getRow(), this.studiesRow)) { // ignore _METADATA row
             try {
-                Variant variant = this.getHbaseToVariantConverter().convert(value);
-                List<VariantStatsWrapper> annotations = this.variantStatisticsCalculator.calculateBatch(
-                        Collections.singletonList(variant), this.studyId, "notused", this.samples);
+                long start = System.nanoTime();
+                if (prefEnd > 0) {
+                    context.getCounter(AbstractVariantTableMapReduce.COUNTER_GROUP_NAME, "nano-next").increment(start - prefEnd);
+                }
+                getLog().info("Convert Variant ...");
+                Variant variant = convert(value);
+                long convertTime = System.nanoTime();
+                context.getCounter(AbstractVariantTableMapReduce.COUNTER_GROUP_NAME, "variants-converted").increment(1);
+                getLog().info("Calculate Stats ...");
+                List<VariantStatsWrapper> annotations = calculateStats(variant);
+                long calc = System.nanoTime();
                 for (VariantStatsWrapper annotation : annotations) {
-                    Put convert = this.variantStatsToHBaseConverter.convert(annotation);
+                    Put convert = convertToPut(annotation);
                     if (null != convert) {
-                        context.write(key, convert);
+                        submitStats(key, context, convert);
                         done = true;
                         context.getCounter(AbstractVariantTableMapReduce.COUNTER_GROUP_NAME, "stats.put").increment(1);
                     }
                 }
+                long submit = System.nanoTime();
                 if (done) {
                     context.getCounter(AbstractVariantTableMapReduce.COUNTER_GROUP_NAME, "variants").increment(1);
+                    context.getCounter(AbstractVariantTableMapReduce.COUNTER_GROUP_NAME, "nano-convert").increment(convertTime - start);
+                    context.getCounter(AbstractVariantTableMapReduce.COUNTER_GROUP_NAME, "nano-calc").increment(calc - convertTime);
+                    context.getCounter(AbstractVariantTableMapReduce.COUNTER_GROUP_NAME, "nano-submit").increment(submit - calc);
                 }
             } catch (IllegalStateException e) {
                 throw new IllegalStateException("Problem with row [hex:" + Bytes.toHex(key.copyBytes()) + "]", e);
             }
         }
+        prefEnd = System.nanoTime();
+    }
+
+    protected void submitStats(ImmutableBytesWritable key, Context context, Put convert) throws IOException,
+            InterruptedException {
+        context.write(key, convert);
+    }
+
+    protected Put convertToPut(VariantStatsWrapper annotation) {
+        return this.variantStatsToHBaseConverter.convert(annotation);
+    }
+
+    protected List<VariantStatsWrapper> calculateStats(Variant variant) {
+        return this.variantStatisticsCalculator.calculateBatch(
+                Collections.singletonList(variant), this.studyId, "notused", this.samples);
+    }
+
+    protected Variant convert(Result value) {
+        return this.getHbaseToVariantConverter().convert(value);
     }
 }

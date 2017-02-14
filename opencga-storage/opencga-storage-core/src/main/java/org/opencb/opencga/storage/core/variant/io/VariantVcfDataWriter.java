@@ -55,6 +55,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -476,6 +477,12 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
         return StringUtils.repeat('N', length); // current return default base TODO load reference sequence
     }
 
+    private static <T> void nonNull(T obj, Consumer<T> consumer) {
+        if (Objects.nonNull(obj)) {
+            consumer.accept(obj);
+        }
+    }
+
     public VariantContext convertVariantToVariantContext(Variant variant, List<String> annotations) { //, StudyConfiguration
         final String noCallAllele = String.valueOf(VCFConstants.NO_CALL_ALLELE);
         VariantContextBuilder variantContextBuilder = new VariantContextBuilder();
@@ -522,9 +529,12 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
             filter = ".";   // write PASS iff all sources agree that the filter is "PASS" or assumed if not present, otherwise write "."
         }
 
-        attributes.putIfNotNull(prk, DECIMAL_FORMAT_7.format(Double.valueOf(studyEntry.getAttributes().get("PR"))));
-        attributes.putIfNotNull(crk, DECIMAL_FORMAT_7.format(Double.valueOf(studyEntry.getAttributes().get("CR"))));
-        attributes.putIfNotNull(oprk, DECIMAL_FORMAT_7.format(Double.valueOf(studyEntry.getAttributes().get("OPR"))));
+        nonNull(studyEntry.getAttributes().get("PR"),
+                obj -> attributes.putIfNotNull(prk, DECIMAL_FORMAT_7.format(Double.valueOf(obj))));
+        nonNull(studyEntry.getAttributes().get("CR"),
+                obj -> attributes.putIfNotNull(crk, DECIMAL_FORMAT_7.format(Double.valueOf(obj))));
+        nonNull(studyEntry.getAttributes().get("OPR"),
+                obj -> attributes.putIfNotNull(oprk, DECIMAL_FORMAT_7.format(Double.valueOf(obj))));
 
         String refAllele = allelesArray.get(0);
         for (String sampleName : this.sampleNames) {

@@ -262,7 +262,7 @@ public class GenomeHelper implements AutoCloseable {
      * @param alt      Alt name
      * @return {@link String} Row key string
      */
-    public byte[] generateVariantRowKey(String chrom, int position, String ref, String alt) {
+    public static byte[] generateVariantRowKey(String chrom, int position, String ref, String alt) {
         int size = PVarchar.INSTANCE.estimateByteSizeFromLength(chrom.length())
                 + QueryConstants.SEPARATOR_BYTE_ARRAY.length
                 + PUnsignedInt.INSTANCE.estimateByteSize(position)

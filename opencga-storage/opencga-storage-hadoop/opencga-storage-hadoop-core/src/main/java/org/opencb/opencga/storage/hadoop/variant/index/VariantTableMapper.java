@@ -46,8 +46,8 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -58,10 +58,13 @@ import java.util.stream.Stream;
 public class VariantTableMapper extends AbstractVariantTableMapReduce {
     public static final String ARCHIVE_GET_BATCH_ASYNC = "opencga.storage.hadoop.hbase.merge.archive.scan.batch.async";
 
-    private ExecutorService executorService;
+    private volatile ExecutorService executorService;
+    private volatile BlockingDeque<Pair<byte[], List<String>>> archiveSliceInputQueue;
+    private volatile BlockingQueue<Pair<Set<Integer>, Result>> archiveSliceOutputQueue;
+    private volatile Future<String> executorSubmitFuture;
 
-    private final AtomicBoolean parallel = new AtomicBoolean(false);
     private final AtomicBoolean asyncGet = new AtomicBoolean(false);
+    private final AtomicBoolean parallel = new AtomicBoolean(false);
 
 
     private boolean isParallel() {
@@ -81,12 +84,50 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
         this.asyncGet.set(context.getConfiguration().getBoolean(ARCHIVE_GET_BATCH_ASYNC, false));
         getLog().info("Async retrieval of archive batches: {}", this.asyncGet.get());
         if (this.asyncGet.get()) {
-            this.executorService = Executors.newFixedThreadPool(1,  (r) -> {
-                Thread t = Executors.defaultThreadFactory().newThread(r);
-                t.setDaemon(true);
-                return t;
-            });
+            setupAsyncQueue();
         }
+    }
+
+    private void setupAsyncQueue() {
+        this.archiveSliceInputQueue = new LinkedBlockingDeque<>();
+        this.archiveSliceOutputQueue = new LinkedBlockingQueue<>(1);
+        // Divert output to queue
+        BiConsumer<Set<Integer>, Result> queueConsumer = (idSet, results) -> {
+            try {
+                this.archiveSliceOutputQueue.put(new ImmutablePair<>(idSet, results));
+            } catch (InterruptedException e) {
+                throw new IllegalStateException("Issue with adding ", e);
+            }
+        };
+        Callable<String> callable = () -> {
+            try {
+                while (!Thread.interrupted()) { // until interrupted
+                    // Wait until element becomes available
+                    Pair<byte[], List<String>> pair = this.archiveSliceInputQueue.takeFirst();
+                    if (Thread.interrupted()) {
+                        break; //exit when interrupted
+                    }
+                    if (null != pair) { // put it back in
+                        this.archiveSliceInputQueue.addFirst(pair);
+                    }
+                    // use default implementation, only consumer is changed
+                    loadFromArchiveSync(this.archiveSliceInputQueue, queueConsumer);
+                    // signal finished!!!
+                    this.archiveSliceOutputQueue.put(new ImmutablePair<>(Collections.emptySet(), null));
+                }
+                return "Done";
+            } catch (Exception e) {
+                getLog().error("Problems with Async processor", e);
+                throw e;
+            }
+        };
+
+        this.executorService = Executors.newFixedThreadPool(1,  (r) -> {
+            Thread t = Executors.defaultThreadFactory().newThread(r);
+            t.setDaemon(true);
+            return t;
+        });
+        executorSubmitFuture = executorService.submit(callable);
     }
 
     public void setAsyncGet(boolean asyncGet) {
@@ -101,6 +142,7 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
     protected void cleanup(Context context) throws IOException, InterruptedException {
         super.cleanup(context);
         if (null != this.executorService) {
+            this.executorSubmitFuture.cancel(true);
             this.executorService.shutdownNow();
         }
     }
@@ -383,7 +425,7 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
         return retMap;
     }
 
-    private static Integer toPosition(Variant variant, boolean isStart) {
+    public static Integer toPosition(Variant variant, boolean isStart) {
         Integer pos = getPosition(variant.getStart(), variant.getEnd(), isStart);
         for (StudyEntry study : variant.getStudies()) {
             List<AlternateCoordinate> alternates = study.getSecondaryAlternates();
@@ -400,7 +442,7 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
         return isStart ? Math.min(start, end) : Math.max(start, end);
     }
 
-    private void completeAlternateCoordinates(Variant variant) {
+    public static void completeAlternateCoordinates(Variant variant) {
         for (StudyEntry study : variant.getStudies()) {
             List<AlternateCoordinate> alternates = study.getSecondaryAlternates();
             if (alternates != null) {
@@ -586,12 +628,23 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
             return; // done
         }
         // split into equal batches
-        ConcurrentLinkedQueue<List<String>> inputQueue = new ConcurrentLinkedQueue<>();
-        inputQueue.addAll(Lists.partition(new ArrayList<>(archiveFileIds), this.archiveBatchSize));
+        ConcurrentLinkedQueue<Pair<byte[], List<String>>> inputQueue = new ConcurrentLinkedQueue<>();
+        Lists.partition(new ArrayList<>(archiveFileIds), this.archiveBatchSize)
+                .forEach(p -> inputQueue.add(new ImmutablePair<>(rowKey, p)));
         getLog().info("Search archive for {} files in {} batches of up to {} ... ",
                 archiveFileIds.size(), inputQueue.size(), this.archiveBatchSize);
 
-        Function<List<String>, Result> retrieveSlice = (batch) -> {
+        if (asyncGet.get()) {
+            loadFromArchiveAsync(inputQueue, merge);
+        } else {
+            loadFromArchiveSync(inputQueue, merge);
+        }
+        getLog().info("Done processing archive data!");
+    }
+
+    private void loadFromArchiveSync(Queue<Pair<byte[], List<String>>> inputQueue,
+                                     BiConsumer<Set<Integer>, Result> consumer) {
+        BiFunction<byte[], List<String>, Result> archiveSliceRetrieveFunction = (rowKey, batch) -> {
             try {
                 Long startTime = System.nanoTime();
                 if (getLog().isDebugEnabled()) {
@@ -610,66 +663,29 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
                 throw new IllegalStateException("Prolems retrieving slice for batch ...", e);
             }
         };
-
-
-        BiConsumer<Set<Integer>, Result> submitResults = merge;
-        if (asyncGet.get()) {
-            loadFromArchiveAsync(context, inputQueue, retrieveSlice, merge);
-        } else {
-            loadFromArchiveSync(context, inputQueue, retrieveSlice, merge);
-        }
-        getLog().info("Done processing archive data!");
-    }
-
-    private void loadFromArchiveSync(Context context, Queue<List<String>> inputQueue, Function<List<String>, Result> retriever,
-                                     BiConsumer<Set<Integer>, Result> consumer) {
         while (!Thread.interrupted()) {
-            List<String> batch = inputQueue.poll();
-            if (null == batch) {
+            Pair<byte[], List<String>> batchPair = inputQueue.poll();
+            if (null == batchPair) {
                 getLog().info("All batches loaded");
                 break; // finished
             }
+            List<String> batch = batchPair.getRight();
+            byte[] rowKey = batchPair.getLeft();
             getLog().info("Search archive for {} files with {} remaining ... ", batch.size(), inputQueue.size());
-            Result result = retriever.apply(batch);
+            Result result = archiveSliceRetrieveFunction.apply(rowKey, batch);
             Set<Integer> batchIds = batch.stream().map(e -> Integer.valueOf(e)).collect(Collectors.toSet());
             consumer.accept(batchIds, result);
         }
     }
 
-    private void loadFromArchiveAsync(Context context, ConcurrentLinkedQueue<List<String>> inputQueue, Function<List
-            <String>, Result> retriever, BiConsumer<Set<Integer>, Result> consumer) {
+    private void loadFromArchiveAsync(Queue<Pair<byte[], List<String>>> inputQueue, BiConsumer<Set<Integer>, Result> consumer) {
+        this.archiveSliceInputQueue.addAll(inputQueue); // fill queue for async processing
         // low capacity for output queue - save memory
-        BlockingQueue<Pair<Set<Integer>, Result>> outputQueue = new LinkedBlockingQueue<>(1);
-        AtomicBoolean done = new AtomicBoolean(false);
-
-
-        // Submit output to queue
-        BiConsumer<Set<Integer>, Result> queueConsumer = (idSet, results) -> {
-            try {
-                outputQueue.put(new ImmutablePair<>(idSet, results));
-            } catch (InterruptedException e) {
-                throw new IllegalStateException("Issue with adding ", e);
-            }
-        };
-
-        Callable<String> callable = () -> {
-            try {
-                // use default implementation, only consumer is changed
-                loadFromArchiveSync(context, inputQueue, retriever, queueConsumer);
-                // signal finished!!!
-                outputQueue.put(new ImmutablePair<>(Collections.emptySet(), null));
-                return "Done";
-            } finally {
-                done.set(true);
-            }
-        };
-        Future<String> future = executorService.submit(callable);
         boolean allFine = true;
         int cnt = 0;
         try {
-            // while NOT (input emtpy and output empty and done)
-            while (!(inputQueue.isEmpty() && outputQueue.isEmpty() && done.get())) {
-                Pair<Set<Integer>, Result> result = outputQueue.poll(1, TimeUnit.SECONDS);
+            while (true) {
+                Pair<Set<Integer>, Result> result = this.archiveSliceOutputQueue.poll(1, TimeUnit.MINUTES);
                 if (null == result) { // something went wrong
                     getLog().error("Queue waited too long for result ...");
                     allFine = false;
@@ -677,8 +693,17 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
                 }
                 Set<Integer> batch = result.getLeft();
                 if (batch.isEmpty()) {
-                    getLog().info("Queue finished and processed {} ids!!!", cnt);
-                    break; // well done
+                    // check if input / output queue is empty
+                    if (this.archiveSliceInputQueue.isEmpty() && this.archiveSliceOutputQueue.isEmpty()) {
+                        getLog().info("Queue finished and processed {} ids!!!", cnt);
+                        break; // well done
+                    } else {
+                        // this can happen if the input queue is filled slower than items processed (very unlikely)
+                        // in this case - continue
+                        getLog().warn("Found empty batch, but queue still full - continue: {} and {}!!!",
+                                this.archiveSliceInputQueue.size(), this.archiveSliceOutputQueue.size());
+                        continue;
+                    }
                 }
                 getLog().info("Received batch of size {}; so far {} ... ", batch.size(), cnt);
                 // submit to original consumer
@@ -687,16 +712,6 @@ public class VariantTableMapper extends AbstractVariantTableMapReduce {
             }
         } catch (Exception e) {
             throw new IllegalStateException("Something went wrong while loading slices ... ", e);
-        }
-        getLog().info("Check future ...");
-        try {
-            future.get(1, TimeUnit.SECONDS); // check for errors & give time to shut down.
-            if (!future.isDone()) { // not done yet -> force!!!
-                getLog().warn("Interrupt unfinished future ... ");
-                future.cancel(true);
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("Problem from callable ...", e);
         }
         if (!allFine) {
             throw new IllegalStateException("Problems during execution of Query task!!!");

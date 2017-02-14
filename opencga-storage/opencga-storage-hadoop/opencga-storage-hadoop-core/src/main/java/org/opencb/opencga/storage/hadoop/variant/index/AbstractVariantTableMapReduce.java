@@ -282,9 +282,10 @@ public abstract class AbstractVariantTableMapReduce extends AbstractHBaseMapRedu
         getLog().info("Finished mapping key: " + Bytes.toString(key.get()));
     }
 
-    abstract void doMap(VariantMapReduceContext ctx) throws IOException, InterruptedException;
+    protected abstract void
+    doMap(VariantMapReduceContext ctx) throws IOException, InterruptedException;
 
-    protected static class VariantMapReduceContext {
+    public static class VariantMapReduceContext {
         public VariantMapReduceContext(byte[] currRowKey, Context context, Result value, Set<Integer> fileIds,
                                        Set<Integer> sampleIds, String chr, long startPos, long nextStartPos) {
             this.currRowKey = currRowKey;
@@ -327,5 +328,12 @@ public abstract class AbstractVariantTableMapReduce extends AbstractHBaseMapRedu
             return chr;
         }
 
+        public long getStartPos() {
+            return startPos;
+        }
+
+        public long getNextStartPos() {
+            return nextStartPos;
+        }
     }
 }

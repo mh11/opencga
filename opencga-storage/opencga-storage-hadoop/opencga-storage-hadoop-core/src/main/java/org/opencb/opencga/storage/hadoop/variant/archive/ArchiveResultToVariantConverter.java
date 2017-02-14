@@ -114,7 +114,31 @@ public class ArchiveResultToVariantConverter {
         if (this.isParallel()) { // if parallel
             return cellStream.parallel().flatMap(cellStreamFunction).collect(toList);
         }
-        return cellStream.flatMap(cellStreamFunction).collect(toList);
+        List<Cell> cells = cellStream.collect(Collectors.toList());
+        List<Variant> results = new ArrayList<>();
+        for (Cell cell : cells) {
+            List<Variant> converted = convert(cell, resolveConflict);
+            for (Variant variant : converted) {
+                if (positionFilter.test(variant)) {
+                    results.add(variant);
+                }
+            }
+        }
+        return results;
+    }
+
+    public List<Variant> convert(Cell cell, boolean resolveConflict) {
+        try {
+            List<Variant> variants = archiveCellToVariants(
+                    CellUtil.cloneQualifier(cell),
+                    CellUtil.cloneValue(cell));
+            if (resolveConflict) {
+                return resolveConflicts(variants);
+            }
+            return variants;
+        } catch (InvalidProtocolBufferException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private List<Variant> archiveCellToVariants(byte[] key, byte[] value) throws InvalidProtocolBufferException {

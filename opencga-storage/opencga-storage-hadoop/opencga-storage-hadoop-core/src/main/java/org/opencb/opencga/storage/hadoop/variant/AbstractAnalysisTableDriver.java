@@ -1,6 +1,9 @@
 package org.opencb.opencga.storage.hadoop.variant;
 
+import htsjdk.variant.variantcontext.Allele;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.hbase.HBaseConfiguration;
@@ -38,6 +41,7 @@ import static org.opencb.opencga.storage.hadoop.variant.index.AbstractVariantTab
  * Created by mh719 on 21/11/2016.
  */
 public abstract class AbstractAnalysisTableDriver extends Configured implements Tool {
+    public static final String OPENCGA_ANALYSIS_REGION = "opencga.analysis.region";
     protected final Logger LOG = LoggerFactory.getLogger(this.getClass());
     private VariantTableHelper variantTablehelper;
     private HBaseStudyConfigurationManager scm;
@@ -160,7 +164,34 @@ public abstract class AbstractAnalysisTableDriver extends Configured implements 
 //        scan.setCaching(caching);        // 1 is the default in Scan, 200 caused timeout issues.
         scan.setCacheBlocks(false);  // don't set to true for MR jobs
         scan.addFamily(getHelper().getColumnFamily()); // Ignore PHOENIX columns!!!
+        /* Filter for a specific region */
+        String region = getConf().get(OPENCGA_ANALYSIS_REGION, StringUtils.EMPTY);
+        if (StringUtils.isNotBlank(region)) {
+            Pair<String, Pair<Integer, Integer>> pair = parseRegion(region);
+            String chrom = pair.getLeft();
+            Integer start = pair.getRight().getLeft();
+            Integer end = pair.getRight().getRight();
+            getLog().info("Restrict scan for region {}:{}-{}", chrom, start, end);
+            /* start */
+            scan.setStartRow(GenomeHelper.generateVariantRowKey(
+                    chrom, start, StringUtils.EMPTY, Allele.NO_CALL_STRING));
+            /* end */
+            scan.setStopRow(GenomeHelper.generateVariantRowKey(
+                    chrom, end, StringUtils.EMPTY, Allele.NO_CALL_STRING));
+        }
         return scan;
+    }
+
+    public static Pair<String, Pair<Integer, Integer>> parseRegion(String region) {
+        if (!region.contains(":") || !region.contains("-")) {
+            throw new IllegalStateException("Region not in format <chr>:<start>-<end>");
+        }
+        String[] split = region.split(":", 2);
+        String[] pos = split[1].split("-", 2);
+        return new ImmutablePair<>(split[0],
+                    new ImmutablePair<>(
+                        Integer.valueOf(pos[0]),
+                        Integer.valueOf(pos[1])));
     }
 
     protected Job createJob(String variantTable, List<Integer> files) throws IOException {

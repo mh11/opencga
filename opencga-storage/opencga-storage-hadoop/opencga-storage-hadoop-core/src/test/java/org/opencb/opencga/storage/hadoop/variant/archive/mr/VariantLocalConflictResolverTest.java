@@ -77,6 +77,20 @@ public class VariantLocalConflictResolverTest {
     }
 
     @Test
+    public void resolveRefRegionWithInsertion() throws Exception {
+        Variant a = addGT(addAttribute(getVariantFilter("1:10230:-:A", "TruthSensitivityTranche99.90to100.00"),QUAL,"1065.12"), "0/1");
+        Variant b = addGT(addAttribute(getVariantFilter("1:10228:C:.", "PASS"),QUAL,"87.71"), "0");
+        b.setEnd(10237);
+        b.setLength(10);
+//        b.setType(VariantType.NO_VARIATION);
+        VariantType ta = a.getType();
+        VariantType tb = b.getType();
+        Collection<Variant> resolved = new VariantLocalConflictResolver().resolveConflicts(Arrays.asList(a, b));
+        assertEquals(3,resolved.size());
+        assertEquals(true, resolved.contains(a));
+    }
+
+    @Test
     public void resolveRefRegion() throws Exception {
         Variant a = addAttribute(getVariantFilter("2:10048155:TCTTTTTTTT:AC", "PASS"),QUAL,"220");
         Variant b = addAttribute(getVariantFilter("2:10048156:T", "SiteConflict"),QUAL,".");

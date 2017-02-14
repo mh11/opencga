@@ -42,10 +42,10 @@ import org.opencb.commons.datastore.core.QueryResult;
 import org.opencb.opencga.storage.core.metadata.StudyConfiguration;
 import org.opencb.opencga.storage.hadoop.utils.HBaseManager;
 import org.opencb.opencga.storage.hadoop.variant.GenomeHelper;
-import org.opencb.opencga.storage.hadoop.variant.metadata.HBaseStudyConfigurationManager;
 import org.opencb.opencga.storage.hadoop.variant.archive.ArchiveDriver;
 import org.opencb.opencga.storage.hadoop.variant.archive.ArchiveHelper;
 import org.opencb.opencga.storage.hadoop.variant.index.phoenix.VariantPhoenixHelper;
+import org.opencb.opencga.storage.hadoop.variant.metadata.HBaseStudyConfigurationManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,7 +57,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static org.opencb.opencga.storage.hadoop.variant.HadoopVariantStorageEngine.OPENCGA_STORAGE_HADOOP_MAPREDUCE_SCANNER_TIMEOUT;
+import static org.opencb.opencga.storage.hadoop.variant.HadoopVariantStorageEngine
+        .OPENCGA_STORAGE_HADOOP_MAPREDUCE_SCANNER_TIMEOUT;
 
 /**
  * @author Matthias Haimel mh719+git@cam.ac.uk
@@ -304,7 +305,6 @@ public abstract class AbstractVariantTableDriver extends Configured implements T
     public static boolean createVariantTableIfNeeded(GenomeHelper genomeHelper, String tableName, Connection con)
             throws IOException {
         VariantPhoenixHelper variantPhoenixHelper = new VariantPhoenixHelper(genomeHelper);
-
         String namespace = SchemaUtil.getSchemaNameFromFullName(tableName);
         if (StringUtils.isNotEmpty(namespace)) {
 //            HBaseManager.createNamespaceIfNeeded(con, namespace);
@@ -315,16 +315,7 @@ public abstract class AbstractVariantTableDriver extends Configured implements T
                 throw new IOException(e);
             }
         }
-
-        int nsplits = genomeHelper.getConf().getInt(CONFIG_VARIANT_TABLE_PRESPLIT_SIZE, 100);
-        List<byte[]> splitList = GenomeHelper.generateBootPreSplitsHuman(
-                nsplits,
-                (chr, pos) -> genomeHelper.generateVariantRowKey(chr, pos, "", ""));
-        boolean newTable = HBaseManager.createTableIfNeeded(con, tableName, genomeHelper.getColumnFamily(),
-                splitList, Compression.getCompressionAlgorithmByName(
-                        genomeHelper.getConf().get(
-                                CONFIG_VARIANT_TABLE_COMPRESSION,
-                                Compression.Algorithm.SNAPPY.getName())));
+        boolean newTable = createHBaseTable(genomeHelper, tableName, con);
         if (newTable) {
             try (java.sql.Connection jdbcConnection = variantPhoenixHelper.newJdbcConnection()) {
                 variantPhoenixHelper.createTableIfNeeded(jdbcConnection, tableName);
@@ -334,6 +325,18 @@ public abstract class AbstractVariantTableDriver extends Configured implements T
             }
         }
         return newTable;
+    }
+
+    public static boolean createHBaseTable(GenomeHelper genomeHelper, String tableName, Connection con) throws IOException {
+        int nsplits = genomeHelper.getConf().getInt(CONFIG_VARIANT_TABLE_PRESPLIT_SIZE, 100);
+        List<byte[]> splitList = GenomeHelper.generateBootPreSplitsHuman(
+                nsplits,
+                (chr, pos) -> genomeHelper.generateVariantRowKey(chr, pos, "", ""));
+       return HBaseManager.createTableIfNeeded(con, tableName, genomeHelper.getColumnFamily(),
+                splitList, Compression.getCompressionAlgorithmByName(
+                        genomeHelper.getConf().get(
+                                CONFIG_VARIANT_TABLE_COMPRESSION,
+                                Compression.Algorithm.SNAPPY.getName())));
     }
 
     public static String[] configure(String[] args, Configured configured) throws Exception {
