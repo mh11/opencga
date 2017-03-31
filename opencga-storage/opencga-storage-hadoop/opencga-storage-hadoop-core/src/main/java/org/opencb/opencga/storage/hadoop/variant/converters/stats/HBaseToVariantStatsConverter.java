@@ -20,6 +20,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.opencb.biodata.models.feature.Genotype;
+import org.opencb.biodata.models.variant.avro.VariantHardyWeinbergStats;
 import org.opencb.biodata.models.variant.protobuf.VariantProto;
 import org.opencb.biodata.models.variant.stats.VariantStats;
 import org.opencb.opencga.storage.hadoop.variant.GenomeHelper;
@@ -149,11 +150,35 @@ public class HBaseToVariantStatsConverter extends AbstractPhoenixConverter {
             stats.setGenotypesFreq(genotypesFreq);
             stats.setMissingAlleles(protoStats.getMissingAlleles());
             stats.setMissingGenotypes(protoStats.getMissingGenotypes());
+            stats.setHw(convert(protoStats.getHw()));
 
         } catch (InvalidProtocolBufferException e) {
             throw new RuntimeException(e);
         }
         return stats;
+    }
+
+    private VariantHardyWeinbergStats convert(VariantProto.VariantHardyWeinbergStats protoHw) {
+        if (null == protoHw) {
+            return null;
+        }
+        VariantHardyWeinbergStats hw = new VariantHardyWeinbergStats();
+        hw.setChi2(protoHw.getChi2() != -1f ? protoHw.getChi2() : null);
+        hw.setPValue(protoHw.getPValue() != -1f ? protoHw.getPValue() : null);
+
+        hw.setN(protoHw.getN() != -1 ? protoHw.getN() : null);
+
+        hw.setNAa00(protoHw.getNAa00() != -1 ? protoHw.getNAa00() : null);
+        hw.setNAa10(protoHw.getNAa10() != -1 ? protoHw.getNAa10() : null);
+        hw.setNAA11(protoHw.getNAA11() != -1 ? protoHw.getNAA11() : null);
+
+        hw.setEAa00(protoHw.getEAa00() != -1f ? protoHw.getEAa00() : null);
+        hw.setEAa10(protoHw.getEAa10() != -1f ? protoHw.getEAa10() : null);
+        hw.setEAA11(protoHw.getEAA11() != -1f ? protoHw.getEAA11() : null);
+
+        hw.setP(protoHw.getP() != -1f ? protoHw.getP() : null);
+        hw.setQ(protoHw.getQ() != -1f ? protoHw.getQ() : null);
+        return hw;
     }
 
     public boolean startsWith(byte[] bytes, byte[] startsWith) {

@@ -16,7 +16,9 @@
 
 package org.opencb.opencga.storage.hadoop.variant.converters.stats;
 
+import org.apache.commons.lang3.ObjectUtils;
 import org.apache.hadoop.hbase.client.Put;
+import org.opencb.biodata.models.variant.avro.VariantHardyWeinbergStats;
 import org.opencb.biodata.models.variant.protobuf.VariantProto;
 import org.opencb.biodata.models.variant.stats.VariantStats;
 import org.opencb.biodata.tools.variant.converters.Converter;
@@ -102,9 +104,32 @@ public class VariantStatsToHBaseConverter extends AbstractPhoenixConverter imple
                 builder.putAllGenotypesFreq(map);
             }
 
+            if (stats.getHw() != null) {
+                builder.setHw(build(stats.getHw()));
+            }
             add(put, statsColumn, builder.build().toByteArray());
         }
         return put;
+    }
+
+    private VariantProto.VariantHardyWeinbergStats.Builder build(VariantHardyWeinbergStats hw) {
+        VariantProto.VariantHardyWeinbergStats.Builder builder = VariantProto.VariantHardyWeinbergStats.newBuilder();
+        builder.setChi2(ObjectUtils.firstNonNull(hw.getChi2(), -1f));
+        builder.setPValue(ObjectUtils.firstNonNull(hw.getPValue(), -1f));
+
+        builder.setN(ObjectUtils.firstNonNull(hw.getN(), -1));
+
+        builder.setNAa00(ObjectUtils.firstNonNull(hw.getNAa00(), -1));
+        builder.setNAa10(ObjectUtils.firstNonNull(hw.getNAa10(), -1));
+        builder.setNAA11(ObjectUtils.firstNonNull(hw.getNAA11(), -1));
+
+        builder.setEAa00(ObjectUtils.firstNonNull(hw.getEAa00(), -1f));
+        builder.setEAa10(ObjectUtils.firstNonNull(hw.getEAa10(), -1f));
+        builder.setEAA11(ObjectUtils.firstNonNull(hw.getEAA11(), -1f));
+
+        builder.setP(ObjectUtils.firstNonNull(hw.getP(), -1f));
+        builder.setQ(ObjectUtils.firstNonNull(hw.getQ(), -1f));
+        return builder;
     }
 
 }
