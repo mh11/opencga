@@ -16,9 +16,11 @@
 
 package org.opencb.opencga.storage.hadoop.variant.metadata;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.TableName;
@@ -34,10 +36,14 @@ import org.opencb.opencga.storage.hadoop.variant.GenomeHelper;
 import org.opencb.opencga.storage.hadoop.variant.index.VariantTableDriver;
 import org.opencb.opencga.storage.hadoop.utils.HBaseLock;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.*;
 import java.util.concurrent.TimeoutException;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * Created on 12/11/15.
@@ -137,7 +143,7 @@ public class HBaseStudyConfigurationManager extends StudyConfigurationManager {
                         return Collections.emptyList();
                     } else {
                         byte[] value = result.getValue(genomeHelper.getColumnFamily(), columnQualifier);
-                        StudyConfiguration studyConfiguration = objectMapper.readValue(value, StudyConfiguration.class);
+                        StudyConfiguration studyConfiguration = toStudyConfiguration(value);
                         return Collections.singletonList(studyConfiguration);
                     }
                 });
@@ -161,7 +167,7 @@ public class HBaseStudyConfigurationManager extends StudyConfigurationManager {
 
         try {
             getHBaseManager().act(tableName, table -> {
-                byte[] bytes = objectMapper.writeValueAsBytes(studyConfiguration);
+                byte[] bytes = toBytes(studyConfiguration);
                 Put put = new Put(studiesRow);
                 put.addColumn(genomeHelper.getColumnFamily(), columnQualifier, studyConfiguration.getTimeStamp(), bytes);
                 table.put(put);
@@ -172,6 +178,32 @@ public class HBaseStudyConfigurationManager extends StudyConfigurationManager {
         }
 
         return new QueryResult<>("", (int) (System.currentTimeMillis() - startTime), 0, 0, "", error, Collections.emptyList());
+    }
+
+    protected byte[] toBytes(StudyConfiguration studyConfiguration) throws JsonProcessingException {
+        byte[] data = objectMapper.writeValueAsBytes(studyConfiguration);
+        ByteArrayOutputStream bout = new ByteArrayOutputStream();
+        try (GZIPOutputStream out = new GZIPOutputStream(bout)) {
+            out.write(data);
+            out.flush();
+        } catch (IOException e) {
+            throw new IllegalStateException("Problems compressing study configuration ...");
+        }
+        return bout.toByteArray();
+    }
+
+    public static boolean isGzipped(byte[] data) {
+        return data[0] == (byte) 0x1f && data[1] == (byte) 0x8b;
+    }
+
+    protected StudyConfiguration toStudyConfiguration(byte[] data) throws IOException {
+        byte[] value = data;
+        if (isGzipped(data)) { // backwards compatibility
+            value = IOUtils.toByteArray(
+                    new GZIPInputStream(
+                            new ByteArrayInputStream(data)));
+        }
+        return objectMapper.readValue(value, StudyConfiguration.class);
     }
 
     @Override

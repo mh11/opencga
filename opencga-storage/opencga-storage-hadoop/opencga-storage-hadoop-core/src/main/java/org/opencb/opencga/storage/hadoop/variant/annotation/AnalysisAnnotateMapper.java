@@ -17,6 +17,7 @@ import org.opencb.opencga.storage.core.variant.annotation.annotators.VariantAnno
 import org.opencb.opencga.storage.core.variant.annotation.annotators.VariantAnnotatorFactory;
 import org.opencb.opencga.storage.hadoop.variant.AbstractHBaseMapReduce;
 import org.opencb.opencga.storage.hadoop.variant.GenomeHelper;
+import org.opencb.opencga.storage.hadoop.variant.converters.annotation.HBaseToVariantAnnotationConverter;
 import org.opencb.opencga.storage.hadoop.variant.converters.annotation.VariantAnnotationToHBaseConverter;
 import org.opencb.opencga.storage.hadoop.variant.index.phoenix.PhoenixHelper;
 import org.opencb.opencga.storage.hadoop.variant.index.phoenix.VariantPhoenixHelper;
@@ -39,6 +40,7 @@ public class AnalysisAnnotateMapper extends AbstractHBaseMapReduce<NullWritable,
     private byte[] studiesRow;
     private boolean forceAnnotation;
     private VariantAnnotationToHBaseConverter annotationConverter;
+    private HBaseToVariantAnnotationConverter hBaseToVariantAnnotationConverter;
     private VariantPhoenixHelper.VariantColumn[] columnsOrdered;
 
     @Override
@@ -49,6 +51,7 @@ public class AnalysisAnnotateMapper extends AbstractHBaseMapReduce<NullWritable,
 
         /* Annotation -> Phoenix converter */
         annotationConverter = new VariantAnnotationToHBaseConverter(getHelper());
+        this.hBaseToVariantAnnotationConverter = new HBaseToVariantAnnotationConverter(getHelper());
         columnsOrdered = VariantPhoenixHelper.VariantColumn.values();
 
         /* Annotator config */
@@ -89,6 +92,15 @@ public class AnalysisAnnotateMapper extends AbstractHBaseMapReduce<NullWritable,
         this.variantsToAnnotate.clear();
     }
 
+    public HBaseToVariantAnnotationConverter gethBaseToVariantAnnotationConverter() {
+        return hBaseToVariantAnnotationConverter;
+    }
+
+    public void sethBaseToVariantAnnotationConverter(HBaseToVariantAnnotationConverter
+                                                             hBaseToVariantAnnotationConverter) {
+        this.hBaseToVariantAnnotationConverter = hBaseToVariantAnnotationConverter;
+    }
+
     @Override
     public void run(Context context) throws IOException, InterruptedException {
         this.setup(context);
@@ -119,18 +131,22 @@ public class AnalysisAnnotateMapper extends AbstractHBaseMapReduce<NullWritable,
                 context.getCounter("opencga", "variant.read").increment(1);
                 getLog().info("Convert ... ");
                 long start = System.nanoTime();
-                Variant variant = this.getHbaseToVariantConverter().convert(value);
-                if (!requireAnnotation(variant)) {
+                Variant variant = getHelper().extractVariantFromVariantRowKey(value.getRow());
+                VariantAnnotation annotation = convertAnnotations(value);
+                if (!requireAnnotation(annotation)) {
                     context.getCounter("opencga", "variant.no-annotation-required").increment(1);
                     return; // No annotation needed
                 }
                 getLog().info("Add to annotate set {} [convert time: {}] ... ", variant, System.nanoTime() - start);
                 variantsToAnnotate.add(variant);
-
             }
         } catch (Exception e) {
             throw new IllegalStateException("Problems with row [hex:" + hexBytes + "] for cells " + cells.length, e);
         }
+    }
+
+    protected VariantAnnotation convertAnnotations(Result value) {
+        return this.hBaseToVariantAnnotationConverter.convert(value);
     }
 
     private List<Object> toOrderedList(Map<PhoenixHelper.Column, ?> columnMap) {
@@ -160,11 +176,10 @@ public class AnalysisAnnotateMapper extends AbstractHBaseMapReduce<NullWritable,
         return new PhoenixArray(elementDataType, input.toArray(new Object[input.size()]));
     }
 
-    private boolean requireAnnotation(Variant variant) {
+    protected boolean requireAnnotation(VariantAnnotation annotation) {
         if (this.forceAnnotation) {
             return true;
         }
-        VariantAnnotation annotation = variant.getAnnotation();
         if (annotation == null) {
             return true;
         }

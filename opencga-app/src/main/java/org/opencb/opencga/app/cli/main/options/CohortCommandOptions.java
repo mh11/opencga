@@ -209,7 +209,7 @@ public class CohortCommandOptions {
         public String description;
 
         @Parameter(names = {"--samples"}, description = "Comma separated values of sampleIds. Will replace all existing sampleIds",
-                required = false, arity = 0)
+                required = false, arity = 1)
         public String samples;
     }
 

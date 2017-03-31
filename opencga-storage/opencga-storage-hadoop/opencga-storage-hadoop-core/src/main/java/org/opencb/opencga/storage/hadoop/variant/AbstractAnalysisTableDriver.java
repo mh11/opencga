@@ -246,7 +246,7 @@ public abstract class AbstractAnalysisTableDriver extends Configured implements 
         return scm;
     }
 
-    private void checkTablesExist(GenomeHelper genomeHelper, String... tables) {
+    protected void checkTablesExist(GenomeHelper genomeHelper, String... tables) {
         final HBaseManager hBaseManager = genomeHelper.getHBaseManager();
         Arrays.stream(tables).forEach(table -> {
             try {

@@ -285,12 +285,6 @@ public class VariantSqlQueryParser {
                     regionFilters.add(buildFilter(VariantColumn.XREFS, "=", id));
                 } else {
                     variants.add(variant);
-//                    List<String> subFilters = new ArrayList<>(4);
-//                    subFilters.add(buildFilter(VariantColumn.CHROMOSOME, "=", variant.getChromosome()));
-//                    subFilters.add(buildFilter(VariantColumn.POSITION, "=", variant.getStart().toString()));
-//                    subFilters.add(buildFilter(VariantColumn.REFERENCE, "=", variant.getReference()));
-//                    subFilters.add(buildFilter(VariantColumn.ALTERNATE, "=", varian   t.getAlternate()));
-//                    regionFilters.add(appendFilters(subFilters, QueryOperation.AND.toString()));
                 }
             }
             if (!variants.isEmpty()) {
@@ -302,7 +296,7 @@ public class VariantSqlQueryParser {
 //        addQueryFilter(query, GENE, VariantColumn.GENES, regionFilters);
         if (isValidParam(query, GENE)) {
             for (String gene : query.getAsStringList(GENE.key())) {
-                Region region = utils.getGeneRegion(gene);
+                Region region = getUtils().getGeneRegion(gene);
                 if (region != null) {
                     regionFilters.add(getRegionFilter(region));
                 } else {
@@ -594,7 +588,7 @@ public class VariantSqlQueryParser {
         return defaultStudyConfiguration;
     }
 
-    private void unsupportedFilter(Query query, VariantQueryParams param) {
+    protected void unsupportedFilter(Query query, VariantQueryParams param) {
         if (isValidParam(query, param)) {
             String warn = "Unsupported filter \"" + param + "\"";
 //            warnings.add(warn);
@@ -787,16 +781,16 @@ public class VariantSqlQueryParser {
     }
 
 
-    private void addQueryFilter(Query query, VariantQueryParams param, Column column, List<String> filters) {
+    protected void addQueryFilter(Query query, VariantQueryParams param, Column column, List<String> filters) {
         addQueryFilter(query, param, column, filters, null);
     }
 
-    private void addQueryFilter(Query query, VariantQueryParams param, Column column, List<String> filters,
+    protected void addQueryFilter(Query query, VariantQueryParams param, Column column, List<String> filters,
                                 Function<String, Object> valueParser) {
         addQueryFilter(query, param, (a, s) -> column, null, valueParser, null, filters);
     }
 
-    private void addQueryFilter(Query query, VariantQueryParams param, BiFunction<String[], String, Column> columnParser,
+    protected void addQueryFilter(Query query, VariantQueryParams param, BiFunction<String[], String, Column> columnParser,
                                 Function<String, Object> valueParser, List<String> filters) {
         addQueryFilter(query, param, columnParser, null, valueParser, null, filters);
     }
@@ -813,7 +807,7 @@ public class VariantSqlQueryParser {
      * @param extraFilters      Provides extra filters to be concatenated to the filter.
      * @param filters           List of filters to be modified.
      */
-    private void addQueryFilter(Query query, VariantQueryParams param,
+    protected void addQueryFilter(Query query, VariantQueryParams param,
                                 BiFunction<String[], String, Column> columnParser,
                                 Function<String, String> operatorParser,
                                 Function<String, Object> valueParser, Function<String[], String> extraFilters, List<String> filters) {
@@ -833,7 +827,7 @@ public class VariantSqlQueryParser {
      * @param filters           List of filters to be modified.
      * @param arrayIdx          Array accessor index in base-1.
      */
-    private void addQueryFilter(Query query, VariantQueryParams param,
+    protected void addQueryFilter(Query query, VariantQueryParams param,
                                 BiFunction<String[], String, Column> columnParser,
                                 Function<String, String> operatorParser,
                                 Function<String, Object> valueParser,
@@ -854,7 +848,7 @@ public class VariantSqlQueryParser {
      * @param filters           List of filters to be modified.
      * @param arrayIdxParser    Array accessor index in base-1.
      */
-    private void addQueryFilter(Query query, VariantQueryParams param,
+    protected void addQueryFilter(Query query, VariantQueryParams param,
                                 BiFunction<String[], String, Column> columnParser,
                                 Function<String, String> operatorParser,
                                 Function<String, Object> valueParser,
@@ -917,16 +911,16 @@ public class VariantSqlQueryParser {
         }
     }
 
-    private String buildFilter(Column column, String op, Object value) {
+    protected String buildFilter(Column column, String op, Object value) {
         return buildFilter(column, op, value, "", "", 0, null, null);
     }
 
-    private String buildFilter(Column column, String op, Object value, boolean negated) {
+    protected String buildFilter(Column column, String op, Object value, boolean negated) {
         return buildFilter(column, op, value, negated ? "NOT " : "", "", 0, null, null);
     }
 
 
-    private String buildFilter(Column column, String op, Object value, String negated, String extra, int idx,
+    protected String buildFilter(Column column, String op, Object value, String negated, String extra, int idx,
                                VariantQueryParams param, String rawValue) {
         Object parsedValue;
         StringBuilder sb = new StringBuilder();

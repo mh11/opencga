@@ -324,7 +324,7 @@ public class HadoopVariantStorageEngine extends VariantStorageEngine {
         return getVariantReaderUtils(conf);
     }
 
-    private HdfsVariantReaderUtils getVariantReaderUtils(Configuration config) {
+    protected HdfsVariantReaderUtils getVariantReaderUtils(Configuration config) {
         if (null == variantReaderUtils) {
             variantReaderUtils = new HdfsVariantReaderUtils(config);
         } else if (this.variantReaderUtils.conf == null && config != null) {
@@ -450,7 +450,7 @@ public class HadoopVariantStorageEngine extends VariantStorageEngine {
         }
     }
 
-    private synchronized HBaseManager getHBaseManager(Configuration configuration) {
+    protected synchronized HBaseManager getHBaseManager(Configuration configuration) {
         if (hBaseManager == null) {
             hBaseManager = new HBaseManager(configuration);
         }
@@ -521,7 +521,7 @@ public class HadoopVariantStorageEngine extends VariantStorageEngine {
         }
     }
 
-    private Configuration getHadoopConfiguration(ObjectMap options) throws StorageEngineException {
+    protected Configuration getHadoopConfiguration(ObjectMap options) throws StorageEngineException {
         Configuration conf = this.conf == null ? HBaseConfiguration.create() : this.conf;
         // This is the only key needed to connect to HDFS:
         //   CommonConfigurationKeysPublic.FS_DEFAULT_NAME_KEY = fs.defaultFS

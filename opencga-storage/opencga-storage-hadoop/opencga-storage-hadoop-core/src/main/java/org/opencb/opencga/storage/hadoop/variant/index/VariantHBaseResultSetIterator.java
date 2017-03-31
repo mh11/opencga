@@ -96,11 +96,15 @@ public class VariantHBaseResultSetIterator extends VariantDBIterator {
     @Override
     public Variant next() {
         try {
-            Variant variant = convert(() -> converter.convert(resultSet));
+            Variant variant = doConvert(resultSet);
             hasNext = fetch(() -> resultSet.next());
             return variant;
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    protected Variant doConvert(ResultSet result) throws SQLException {
+        return convert(() -> converter.convert(result));
     }
 }
