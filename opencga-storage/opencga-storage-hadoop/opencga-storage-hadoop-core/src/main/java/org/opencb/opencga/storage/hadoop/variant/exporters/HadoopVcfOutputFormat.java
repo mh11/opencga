@@ -22,6 +22,7 @@ import org.opencb.opencga.storage.hadoop.variant.index.VariantTableHelper;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.function.BiConsumer;
 
 /**
  * Created by mh719 on 21/12/2016.
@@ -57,19 +58,14 @@ public class HadoopVcfOutputFormat extends FileOutputFormat<Variant, NullWritabl
         }
     }
 
-    private VariantVcfDataWriter configureWriter(final TaskAttemptContext job, OutputStream fileOut) {
+    protected VariantVcfDataWriter configureWriter(final TaskAttemptContext job, OutputStream fileOut) {
         job.getCounter(VariantVcfDataWriter.class.getName(), "failed").increment(0); // init
         final Configuration conf = job.getConfiguration();
-        boolean withGenotype = conf.getBoolean(VariantTableExportDriver.CONFIG_VARIANT_TABLE_EXPORT_GENOTYPE, false);
-
         try (VariantTableHelper helper = new VariantTableHelper(conf)) {
+            BiConsumer<Variant, RuntimeException> failed = (v, e) ->
+                    job.getCounter(VariantVcfDataWriter.class.getName(), "failed").increment(1);
             StudyConfiguration sc = helper.loadMeta();
-            VariantSourceDBAdaptor source = new HadoopVariantSourceDBAdaptor(helper);
-            QueryOptions options = new QueryOptions();
-            VariantVcfDataWriter exporter = new VariantVcfDataWriter(sc, source, fileOut, options);
-            exporter.setExportGenotype(withGenotype);
-            exporter.setConverterErrorListener((v, e) ->
-                    job.getCounter(VariantVcfDataWriter.class.getName(), "failed").increment(1));
+            VariantVcfDataWriter exporter = prepareVcfWriter(helper, sc, failed, fileOut);
             exporter.open();
             exporter.pre();
             return exporter;
@@ -77,6 +73,21 @@ public class HadoopVcfOutputFormat extends FileOutputFormat<Variant, NullWritabl
             throw new IllegalStateException("Problem init Helper", e);
         }
 
+    }
+
+    protected VariantVcfDataWriter prepareVcfWriter(VariantTableHelper helper, StudyConfiguration sc,
+                                                    BiConsumer<Variant, RuntimeException> failed,
+                                                    OutputStream fileOut) throws IOException {
+        boolean withGenotype = helper.getConf()
+                .getBoolean(VariantTableExportDriver.CONFIG_VARIANT_TABLE_EXPORT_GENOTYPE, false);
+        VariantSourceDBAdaptor source = new HadoopVariantSourceDBAdaptor(helper);
+        QueryOptions options = new QueryOptions();
+        VariantVcfDataWriter exporter = new VariantVcfDataWriter(sc, source, fileOut, options);
+        exporter.setExportGenotype(withGenotype);
+        if (null != failed) {
+            exporter.setConverterErrorListener(failed);
+        }
+        return exporter;
     }
 
     protected static class VcfRecordWriter extends RecordWriter<Variant, NullWritable> {

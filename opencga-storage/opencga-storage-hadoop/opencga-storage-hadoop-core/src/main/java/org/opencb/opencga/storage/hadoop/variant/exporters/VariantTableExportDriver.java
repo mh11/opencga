@@ -34,8 +34,8 @@ public class VariantTableExportDriver extends AbstractAnalysisTableDriver {
     public static final String CONFIG_VARIANT_TABLE_EXPORT_PATH = "opencga.variant.table.export.path";
     public static final String CONFIG_VARIANT_TABLE_EXPORT_TYPE = "opencga.variant.table.export.type";
     public static final String CONFIG_VARIANT_TABLE_EXPORT_GENOTYPE = "opencga.variant.table.export.genotype";
-    private String outFile;
-    private ExportType type;
+    protected String outFile;
+    protected ExportType type;
 
     public enum ExportType {AVRO, VCF};
 

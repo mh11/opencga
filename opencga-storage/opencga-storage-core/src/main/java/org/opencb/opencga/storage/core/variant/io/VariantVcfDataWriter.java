@@ -319,7 +319,7 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
         }
     }
 
-    protected String buildCohortPrefix(String cohortName) {
+    public String buildCohortPrefix(String cohortName) {
         return cohortName.equals(StudyEntry.DEFAULT_COHORT) ? StringUtils.EMPTY : cohortName + "_";
     }
 
@@ -804,6 +804,9 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
         }
         this.cohortIds.forEach((cohortName, cohortId) -> {
             VariantStats stats = studyEntry.getStats().get(cohortName);
+            if (null == stats) {
+                return;
+            }
             String prefix = buildCohortPrefix(cohortName);
             int an = stats.getAltAlleleCount() + stats.getRefAlleleCount();
             attributes.put(prefix + VCFConstants.ALLELE_NUMBER_KEY, String.valueOf(an));
