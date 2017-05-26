@@ -253,6 +253,12 @@ public class VariantLocalConflictResolver {
                     variant.setEnd(pairs.stream().mapToInt(p -> p.getRight()).max().getAsInt());
                     variant.setLength((variant.getEnd() - variant.getStart()) + 1);
                     resolved.clear();
+
+                    Map<Variant, List<Variant>> vToAlt = removeDuplicatedAlts(Collections.singleton(variant)).entrySet().stream().collect(
+                            Collectors.groupingBy(
+                                    Map.Entry::getValue,
+                                    Collectors.mapping(e -> e.getKey().getVariant(), Collectors.toList())));
+                    varToAlt.put(variant, vToAlt.get(variant));
                     resolved.add(variant);
                 } else {
                     // does not fit
