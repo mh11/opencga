@@ -798,12 +798,11 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
                 }
             }
             if (i < variant.getAnnotation().getConsequenceTypes().size() - 1) {
-                stringBuilder.append("&");
+                stringBuilder.append(",");
             }
         }
 
         attributes.put(getAttributeKey(CSQ), stringBuilder.toString());
-//        infoAnnotations.put("CSQ", stringBuilder.toString().replaceAll("&|$", ""));
         return attributes;
     }
 
