@@ -69,6 +69,7 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
     private static final DecimalFormat DECIMAL_FORMAT_7 = new DecimalFormat("#.#######");
     private static final DecimalFormat DECIMAL_FORMAT_3 = new DecimalFormat("#.###");
     protected static final String MINOR_ALLELE_FREQUENCY_KEY = "MAF";
+    public static final String CSQ = "CSQ";
     private final Logger logger = LoggerFactory.getLogger(VariantVcfDataWriter.class);
 
 
@@ -96,6 +97,7 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
     private BiFunction<String, VariantStats, Map<String, String>> customAttributeStatsFunction = null;
     private Function<Variant, Map<String, String>> customAttributeFunction = null;
     private Map<String, Integer> cohortIds;
+    private Map<String, String> attributeKeyMapping;
 
     public VariantVcfDataWriter(StudyConfiguration studyConfiguration, VariantSourceDBAdaptor sourceDBAdaptor, OutputStream outputStream,
                                 QueryOptions queryOptions) {
@@ -106,6 +108,20 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
         studyId = this.studyConfiguration.getStudyId();
         studyName = this.studyConfiguration.getStudyName();
         cohortIds = new HashMap<>(studyConfiguration.getCohortIds());
+        this.attributeKeyMapping = new HashMap<>();
+    }
+
+    public void addAttributeKeyMapping(String from, String to) {
+        this.attributeKeyMapping.put(from, to);
+    }
+
+    /**
+     * Returns the registered key or the input key provided
+     * @param from input key to map
+     * @return String value for key
+     */
+    public String getAttributeKey(String from) {
+        return this.attributeKeyMapping.getOrDefault(from, from);
     }
 
     public Map<String, Integer> getCohortIds() {
@@ -234,9 +250,9 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
         meta.add(new VCFFilterHeaderLine(".", "No FILTER info"));
 
         /* INFO */
-        meta.add(new VCFInfoHeaderLine("PR", 1, VCFHeaderLineType.Float, "Pass rate"));
-        meta.add(new VCFInfoHeaderLine("CR", 1, VCFHeaderLineType.Float, "Call rate"));
-        meta.add(new VCFInfoHeaderLine("OPR", 1, VCFHeaderLineType.Float, "Overall Pass rate"));
+        meta.add(new VCFInfoHeaderLine(getAttributeKey("PR"), 1, VCFHeaderLineType.Float, "Pass rate"));
+        meta.add(new VCFInfoHeaderLine(getAttributeKey("CR"), 1, VCFHeaderLineType.Float, "Call rate"));
+        meta.add(new VCFInfoHeaderLine(getAttributeKey("OPR"), 1, VCFHeaderLineType.Float, "Overall Pass rate"));
         addCohortInfo(meta);
         addAnnotationInfo(meta);
 
@@ -294,7 +310,7 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
             }
 //            String annotationString = queryOptions.getString("annotations", DEFAULT_ANNOTATIONS).replaceAll(",", "|");
             annotations = Arrays.asList(annotationString.split("\\|"));
-            meta.add(new VCFInfoHeaderLine("CSQ", 1, VCFHeaderLineType.String, "Consequence annotations from CellBase. "
+            meta.add(new VCFInfoHeaderLine(getAttributeKey(CSQ), 1, VCFHeaderLineType.String, "Consequence annotations from CellBase. "
                     + "Format: " + annotationString));
         }
     }
@@ -510,13 +526,6 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
         if (sourceFilter != null && !filter.equals(sourceFilter)) {
             filter = ".";   // write PASS iff all sources agree that the filter is "PASS" or assumed if not present, otherwise write "."
         }
-
-//        nonNull(studyEntry.getAttributes().get("PR"),
-//                obj -> attributes.putIfNotNull(prk, DECIMAL_FORMAT_7.format(Double.valueOf(obj))));
-//        nonNull(studyEntry.getAttributes().get("CR"),
-//                obj -> attributes.putIfNotNull(crk, DECIMAL_FORMAT_7.format(Double.valueOf(obj))));
-//        nonNull(studyEntry.getAttributes().get("OPR"),
-//                obj -> attributes.putIfNotNull(oprk, DECIMAL_FORMAT_7.format(Double.valueOf(obj))));
 
         String refAllele = allelesArray.get(0);
         for (String sampleName : this.sampleNames) {
@@ -793,7 +802,7 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
             }
         }
 
-        attributes.put("CSQ", stringBuilder.toString());
+        attributes.put(getAttributeKey(CSQ), stringBuilder.toString());
 //        infoAnnotations.put("CSQ", stringBuilder.toString().replaceAll("&|$", ""));
         return attributes;
     }
