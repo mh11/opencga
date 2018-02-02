@@ -116,7 +116,7 @@ public class VariantVcfDataWriter implements DataWriter<Variant> {
     }
 
     /**
-     * Returns the registered key or the input key provided
+     * The function converts the provided key to a registered value or returns the original input key.
      * @param from input key to map
      * @return String value for key
      */
